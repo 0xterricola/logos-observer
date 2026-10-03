@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Observer runtime state / credentials
+devices.json
+devices.lock
+nonces.sqlite3
+*.sqlite
+*.sqlite3
+*.db
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Local Observer backups
+observer.py.pre-*
+observer.py.v1-final
+
+# macOS
+.DS_Store
