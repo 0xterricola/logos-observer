@@ -1,0 +1,472 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+from http.server import (
+    BaseHTTPRequestHandler,
+    ThreadingHTTPServer,
+)
+from pathlib import Path
+
+from v2_auth import (
+    AuthError,
+    NonceStore,
+    authenticate_v2_request,
+)
+from v2_pairing import (
+    PairingError,
+    PairingStore,
+)
+from v2_node import (
+    DEFAULT_UPSTREAM,
+    LogosNodeReader,
+)
+from v2_status import (
+    build_status_snapshot,
+)
+from v2_tls import (
+    create_server_ssl_context,
+    ensure_tls_identity,
+)
+
+
+MAX_JSON_BODY = 32 * 1024
+
+
+class V2Handler(BaseHTTPRequestHandler):
+    server_version = "LogosObserverV2/0"
+    protocol_version = "HTTP/1.1"
+
+    def log_message(
+        self,
+        format,
+        *args,
+    ):
+        return
+
+    def send_json(
+        self,
+        status,
+        payload,
+    ):
+        body = json.dumps(
+            payload,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+        self.send_response(status)
+        self.send_header(
+            "Content-Type",
+            "application/json",
+        )
+        self.send_header(
+            "Content-Length",
+            str(len(body)),
+        )
+        self.end_headers()
+        self.wfile.write(body)
+
+    def read_json(self):
+        raw_length = self.headers.get(
+            "Content-Length"
+        )
+
+        try:
+            length = int(
+                raw_length or "0"
+            )
+        except ValueError:
+            raise PairingError(
+                "invalid_json",
+                400,
+            )
+
+        if (
+            length <= 0
+            or length > MAX_JSON_BODY
+        ):
+            raise PairingError(
+                "invalid_json",
+                400,
+            )
+
+        body = self.rfile.read(length)
+
+        try:
+            payload = json.loads(
+                body.decode("utf-8")
+            )
+        except (
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ):
+            raise PairingError(
+                "invalid_json",
+                400,
+            )
+
+        if not isinstance(
+            payload,
+            dict,
+        ):
+            raise PairingError(
+                "invalid_json",
+                400,
+            )
+
+        return payload
+
+    def authenticate(
+        self,
+        *,
+        body=b"",
+        required_scope=None,
+    ):
+        try:
+            return authenticate_v2_request(
+                pairing_store=
+                    self.server.pairing_store,
+                nonce_store=
+                    self.server.nonce_store,
+                method=self.command,
+                request_target=self.path,
+                headers=self.headers,
+                body=body,
+                required_scope=
+                    required_scope,
+                peer_address=
+                    self.client_address[0],
+            )
+        except AuthError as exc:
+            self.send_json(
+                exc.status_code,
+                {
+                    "error":
+                        exc.code,
+                },
+            )
+            return None
+
+    def send_read_section(
+        self,
+        *,
+        required_scope,
+        read,
+    ):
+        auth = self.authenticate(
+            required_scope=
+                required_scope,
+        )
+
+        if auth is None:
+            return
+
+        try:
+            payload = read()
+        except Exception:
+            payload = None
+
+        self.send_json(
+            200,
+            payload,
+        )
+
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_json(
+                200,
+                {
+                    "ok": True,
+                    "service":
+                        "logos-observer",
+                    "protocol":
+                        "logos-observer-v2",
+                },
+            )
+            return
+
+        if self.path == "/v2/status":
+            auth = self.authenticate()
+
+            if auth is None:
+                return
+
+            snapshot = (
+                build_status_snapshot(
+                    device=auth["device"],
+                    reader=
+                        self.server.status_reader,
+                )
+            )
+
+            self.send_json(
+                200,
+                snapshot,
+            )
+            return
+
+        if self.path == "/v2/network":
+            self.send_read_section(
+                required_scope=
+                    "network.status.read",
+                read=(
+                    self.server
+                    .status_reader
+                    .read_network
+                ),
+            )
+            return
+
+        if self.path == "/v2/mining":
+            self.send_read_section(
+                required_scope=
+                    "mining.status.read",
+                read=(
+                    self.server
+                    .status_reader
+                    .read_mining
+                ),
+            )
+            return
+
+        if self.path == "/v2/rewards":
+            self.send_read_section(
+                required_scope=
+                    "rewards.status.read",
+                read=(
+                    self.server
+                    .status_reader
+                    .read_rewards
+                ),
+            )
+            return
+
+        # /v2/blend remains reserved until its
+        # v2 data contract is activated.
+        self.send_json(
+            404,
+            {
+                "error":
+                    "not_found",
+            },
+        )
+
+    def do_POST(self):
+        if self.path != "/v2/pair":
+            self.send_json(
+                404,
+                {
+                    "error":
+                        "not_found",
+                },
+            )
+            return
+
+        try:
+            payload = self.read_json()
+
+            secret = payload.get(
+                "secret"
+            )
+            device_name = payload.get(
+                "device_name"
+            )
+            scopes = payload.get(
+                "scopes"
+            )
+
+            if not isinstance(
+                secret,
+                str,
+            ):
+                raise PairingError(
+                    "invalid_bootstrap",
+                    401,
+                )
+
+            result = (
+                self.server
+                .pairing_store
+                .activate(
+                    secret=secret,
+                    device_name=
+                        device_name,
+                    scopes=scopes,
+                    peer_address=
+                        self.client_address[
+                            0
+                        ],
+                )
+            )
+
+        except PairingError as exc:
+            self.send_json(
+                exc.status_code,
+                {
+                    "error":
+                        exc.code,
+                },
+            )
+            return
+
+        self.send_json(
+            200,
+            result,
+        )
+
+    def do_DELETE(self):
+        if self.path != "/v2/device":
+            self.send_json(
+                404,
+                {
+                    "error":
+                        "not_found",
+                },
+            )
+            return
+
+        auth = self.authenticate()
+
+        if auth is None:
+            return
+
+        self.server.pairing_store.revoke_device(
+            auth["device_id"]
+        )
+
+        self.send_json(
+            200,
+            {
+                "revoked": True,
+            },
+        )
+
+
+def main():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+    )
+
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8081,
+    )
+
+    parser.add_argument(
+        "--advertise-host",
+        default=None,
+        help=(
+            "address clients use to reach this "
+            "Observer; defaults to --host"
+        ),
+    )
+
+    parser.add_argument(
+        "--state-dir",
+        type=Path,
+        default=Path(".v2-state"),
+    )
+
+    parser.add_argument(
+        "--upstream",
+        default=DEFAULT_UPSTREAM,
+        help=(
+            "local Logos node API; "
+            "keep this bound to loopback"
+        ),
+    )
+
+    args = parser.parse_args()
+
+    advertise_host = (
+        args.advertise_host
+        or args.host
+    )
+
+    identity = ensure_tls_identity(
+        args.state_dir,
+        common_name="Logos Observer",
+        dns_names=[
+            "logos-observer.local",
+        ],
+        ip_addresses=[
+            advertise_host,
+        ],
+    )
+
+    pairing_store = PairingStore(
+        args.state_dir
+    )
+
+    nonce_store = NonceStore(
+        args.state_dir
+    )
+
+    status_reader = (
+        LogosNodeReader(
+            upstream=args.upstream,
+        )
+    )
+
+    server = ThreadingHTTPServer(
+        (
+            args.host,
+            args.port,
+        ),
+        V2Handler,
+    )
+
+    server.pairing_store = (
+        pairing_store
+    )
+
+    server.nonce_store = (
+        nonce_store
+    )
+
+    server.status_reader = (
+        status_reader
+    )
+
+    context = create_server_ssl_context(
+        identity["cert_path"],
+        identity["key_path"],
+    )
+
+    server.socket = context.wrap_socket(
+        server.socket,
+        server_side=True,
+    )
+
+    print(
+        "Logos Observer v2 HTTPS "
+        f"listening on "
+        f"{args.host}:{args.port}"
+    )
+
+    print(
+        "Advertised endpoint: "
+        f"{advertise_host}:{args.port}"
+    )
+
+    print(
+        "SPKI pin: "
+        f"{identity['pin']}"
+    )
+
+    print("TLS: 1.3 only")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()
