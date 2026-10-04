@@ -267,6 +267,33 @@ class ObserverV2HTTPSServerTests(
             body,
         )
 
+    def test_unsupported_method_is_json_404(
+        self,
+    ):
+        status, body, tls = self.request(
+            "PUT",
+            "/v2/status",
+        )
+
+        self.assertEqual(
+            tls,
+            "TLSv1.3",
+        )
+
+        self.assertEqual(
+            status,
+            404,
+        )
+
+        self.assertEqual(
+            json.loads(body),
+            {
+                "error":
+                    "not_found",
+            },
+        )
+
+
     def test_unknown_route_is_404(
         self,
     ):
@@ -381,6 +408,197 @@ class ObserverV2HTTPSServerTests(
             "X-Observer-Signature":
                 signature,
         }
+
+    def test_status_query_uses_exact_request_target(
+        self,
+    ):
+        import time
+
+        pairing = self.pair_device(
+            [
+                "node.status.read",
+                "network.status.read",
+                "mining.status.read",
+                "rewards.status.read",
+            ]
+        )
+
+        target = (
+            "/v2/status"
+            "?detail=mining%2Frewards"
+            "&limit=10"
+        )
+
+        headers = self.signed_headers(
+            pairing,
+            method="GET",
+            path=target,
+            nonce_byte=90,
+            timestamp=int(time.time()),
+        )
+
+        status, body, tls = self.request(
+            "GET",
+            target,
+            headers=headers,
+        )
+
+        self.assertEqual(
+            tls,
+            "TLSv1.3",
+        )
+
+        self.assertEqual(
+            status,
+            200,
+        )
+
+        payload = json.loads(body)
+
+        self.assertEqual(
+            payload["v"],
+            2,
+        )
+
+        self.assertIn(
+            "node",
+            payload,
+        )
+
+    def test_query_reordering_breaks_signature(
+        self,
+    ):
+        import time
+
+        pairing = self.pair_device(
+            [
+                "node.status.read",
+            ]
+        )
+
+        signed_target = (
+            "/v2/status"
+            "?detail=node"
+            "&limit=10"
+        )
+
+        sent_target = (
+            "/v2/status"
+            "?limit=10"
+            "&detail=node"
+        )
+
+        headers = self.signed_headers(
+            pairing,
+            method="GET",
+            path=signed_target,
+            nonce_byte=91,
+            timestamp=int(time.time()),
+        )
+
+        status, body, _ = self.request(
+            "GET",
+            sent_target,
+            headers=headers,
+        )
+
+        self.assertEqual(
+            status,
+            401,
+        )
+
+        self.assertEqual(
+            json.loads(body),
+            {
+                "error":
+                    "bad_signature",
+            },
+        )
+
+    def test_query_percent_encoding_breaks_signature(
+        self,
+    ):
+        import time
+
+        pairing = self.pair_device(
+            [
+                "node.status.read",
+            ]
+        )
+
+        signed_target = (
+            "/v2/status"
+            "?detail=mining%2Frewards"
+        )
+
+        sent_target = (
+            "/v2/status"
+            "?detail=mining%2frewards"
+        )
+
+        headers = self.signed_headers(
+            pairing,
+            method="GET",
+            path=signed_target,
+            nonce_byte=92,
+            timestamp=int(time.time()),
+        )
+
+        status, body, _ = self.request(
+            "GET",
+            sent_target,
+            headers=headers,
+        )
+
+        self.assertEqual(
+            status,
+            401,
+        )
+
+        self.assertEqual(
+            json.loads(body),
+            {
+                "error":
+                    "bad_signature",
+            },
+        )
+
+    def test_malformed_request_targets_are_not_routed(
+        self,
+    ):
+        targets = (
+            "/v2/status?",
+            "/v2/status#fragment",
+            (
+                "https://observer.invalid"
+                "/v2/status"
+            ),
+        )
+
+        for target in targets:
+            with self.subTest(
+                target=target,
+            ):
+                status, body, _ = (
+                    self.request(
+                        "GET",
+                        target,
+                    )
+                )
+
+                self.assertEqual(
+                    status,
+                    404,
+                )
+
+                self.assertEqual(
+                    json.loads(body),
+                    {
+                        "error":
+                            "not_found",
+                    },
+                )
+
 
     def test_authenticated_status(
         self,

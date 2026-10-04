@@ -61,6 +61,11 @@ The v2 reference implementation currently includes:
 - ±120 second request timestamp validation
 - persistent SQLite nonce/replay protection
 - replay rejection across process restarts
+- cross-process-safe pairing state updates
+- exact request-target routing without normalization
+- strict HTTP body-framing validation
+- proxy-bypassed loopback node access
+- thread-safe per-path upstream caching
 - per-device revocation and self-revocation
 - sanitized combined node status
 - explicit network, mining, and rewards read routes
@@ -71,7 +76,7 @@ The v2 reference implementation currently includes:
 - voucher counts without exposing voucher commitments or nullifiers
 - interoperability vectors for HMAC, SPKI pinning, certificate parsing, and pairing QR format
 
-The current test suite contains 47 tests covering protocol, TLS, pairing, HMAC authentication, replay protection, node mapping, status semantics, dedicated routes, revocation, and integration behavior.
+The current test suite contains 61 tests covering protocol, TLS, pairing, HMAC authentication, replay protection, node mapping, status semantics, dedicated routes, HTTP framing, cross-process state locking, upstream isolation, concurrency, revocation, and integration behavior.
 
 The reference implementation has also been validated live with:
 
@@ -575,6 +580,113 @@ Subsequent requests from that device return:
 }
 ```
 
+### v2 Hardening Guarantees
+
+The reference implementation deliberately hardens the local protocol boundary beyond the basic cryptographic contract.
+
+#### Cross-process pairing state
+
+The HTTPS server and local pairing CLI are separate processes that share pairing state.
+
+Observer serializes pairing-state transactions with:
+
+```text
+thread-level lock
+      +
+dedicated v2-pairing.lock
+      +
+POSIX flock
+```
+
+The JSON state itself continues to use atomic replacement.
+
+The dedicated lock file is important because locking the JSON file directly would not safely coordinate processes after `os.replace()` changes the file inode.
+
+The pairing state file and lock file are restricted to mode `0600`.
+
+This prevents simultaneous CLI/server read-modify-write operations from silently overwriting each other's state.
+
+The current reference server uses POSIX file locking and therefore targets Linux/macOS server environments.
+
+#### Exact request-target routing
+
+Observer separates routing from authentication.
+
+For a request such as:
+
+```text
+/v2/status?detail=mining%2Frewards&limit=10
+```
+
+the router matches:
+
+```text
+/v2/status
+```
+
+while HMAC authentication still receives:
+
+```text
+/v2/status?detail=mining%2Frewards&limit=10
+```
+
+exactly as transmitted.
+
+Observer does not normalize:
+
+- query ordering
+- percent-encoding case
+- path encoding
+- query contents
+
+Changing any signed request-target byte changes the expected HMAC.
+
+Malformed targets such as a bare trailing `?`, fragment-bearing targets, or absolute-form targets are not routed to authenticated Observer operations.
+
+#### HTTP request framing
+
+The pairing endpoint accepts only a bounded JSON request body with explicit framing.
+
+Observer rejects:
+
+- `Transfer-Encoding`
+- chunked request bodies
+- missing `Content-Length`
+- duplicate `Content-Length`
+- non-decimal `Content-Length`
+- zero-length pairing bodies
+- bodies larger than the configured JSON limit
+
+Invalid framing closes the connection rather than attempting to parse another request from potentially ambiguous unread bytes.
+
+Unsupported HTTP methods receive the Observer JSON `not_found` response instead of Python's default HTML `501` response.
+
+#### Loopback upstream isolation
+
+The Logos node API is expected to remain on loopback.
+
+Observer explicitly disables environment-derived HTTP proxies for node API requests.
+
+Variables such as:
+
+```text
+HTTP_PROXY
+HTTPS_PROXY
+ALL_PROXY
+```
+
+must not cause a request intended for the local Logos API to leave the machine.
+
+#### Concurrent node reads
+
+The v2 HTTPS server is threaded.
+
+The node reader therefore uses thread-safe cache access and a per-upstream-path single-flight lock.
+
+Concurrent requests for the same uncached Logos endpoint result in one upstream fetch whose cached result is then reused by the waiting readers.
+
+Different upstream paths are not unnecessarily serialized.
+
 ### v2 Interoperability Vectors
 
 Reference vectors are stored in:
@@ -1062,7 +1174,7 @@ This repository contains:
 
 The v2 implementation has been exercised against a running Logos node over a real LAN connection.
 
-The current automated suite contains 47 passing tests.
+The current automated suite contains 61 passing tests.
 
 The remaining work is primarily release and client interoperability work:
 

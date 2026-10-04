@@ -2,11 +2,16 @@
 
 import json
 import re
+import threading
 import time
 from decimal import Decimal, InvalidOperation
 from urllib.error import URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import (
+    ProxyHandler,
+    Request,
+    build_opener,
+)
 
 
 DEFAULT_UPSTREAM = (
@@ -44,6 +49,22 @@ class LogosNodeReader:
         self.fetch_json = fetch_json
 
         self._cache = {}
+        self._cache_lock = threading.RLock()
+        self._path_locks = {}
+
+        # Never route the node's local API through HTTP_PROXY,
+        # HTTPS_PROXY, or other environment proxy settings.
+        #
+        # Supplying an explicit empty ProxyHandler also prevents
+        # urllib.build_opener() from installing its default
+        # environment-aware proxy handler.
+        self._opener = (
+            build_opener(
+                ProxyHandler({})
+            )
+            if fetch_json is None
+            else None
+        )
 
     def _request_json(self, path):
         if self.fetch_json is not None:
@@ -58,7 +79,7 @@ class LogosNodeReader:
             },
         )
 
-        with urlopen(
+        with self._opener.open(
             request,
             timeout=self.timeout,
         ) as response:
@@ -75,30 +96,52 @@ class LogosNodeReader:
 
         return value
 
+    def _path_lock(self, path):
+        with self._cache_lock:
+            lock = self._path_locks.get(
+                path
+            )
+
+            if lock is None:
+                lock = threading.Lock()
+
+                self._path_locks[
+                    path
+                ] = lock
+
+            return lock
+
     def _fetch(self, path):
-        now = time.monotonic()
+        # Serialize only requests for the same upstream path.
+        # Different node endpoints remain independently fetchable.
+        with self._path_lock(path):
+            now = time.monotonic()
 
-        cached = self._cache.get(path)
+            with self._cache_lock:
+                cached = self._cache.get(
+                    path
+                )
 
-        if cached is not None:
-            cached_at, value = cached
+            if cached is not None:
+                cached_at, value = cached
 
-            if (
-                now - cached_at
-                <= self.cache_ttl
-            ):
-                return value
+                if (
+                    now - cached_at
+                    <= self.cache_ttl
+                ):
+                    return value
 
-        value = self._request_json(
-            path
-        )
+            value = self._request_json(
+                path
+            )
 
-        self._cache[path] = (
-            now,
-            value,
-        )
+            with self._cache_lock:
+                self._cache[path] = (
+                    time.monotonic(),
+                    value,
+                )
 
-        return value
+            return value
 
     @staticmethod
     def _decimal_string(value):

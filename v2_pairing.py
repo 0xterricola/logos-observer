@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import contextlib
+import fcntl
 import hashlib
 import hmac
 import json
@@ -92,14 +94,57 @@ class PairingStore:
         )
 
         self.lock = threading.RLock()
+        self.lock_file = (
+            self.state_dir
+            / "v2-pairing.lock"
+        )
 
-        if not self.state_file.exists():
-            self._write(
-                {
-                    "pending": None,
-                    "devices": {},
-                }
+        # Initialization must use the same process-wide lock as
+        # later read/modify/write operations. The pairing CLI and
+        # HTTPS server are separate processes and may start at the
+        # same time.
+        with self._locked():
+            if not self.state_file.exists():
+                self._write(
+                    {
+                        "pending": None,
+                        "devices": {},
+                    }
+                )
+
+    @contextlib.contextmanager
+    def _locked(self):
+        """Serialize pairing state access across threads and processes."""
+        with self.lock:
+            fd = os.open(
+                self.lock_file,
+                os.O_CREAT | os.O_RDWR,
+                0o600,
             )
+
+            try:
+                # Preserve the credential-state security boundary even
+                # if an existing lock file has broader permissions.
+                os.fchmod(
+                    fd,
+                    0o600,
+                )
+
+                fcntl.flock(
+                    fd,
+                    fcntl.LOCK_EX,
+                )
+
+                yield
+
+            finally:
+                try:
+                    fcntl.flock(
+                        fd,
+                        fcntl.LOCK_UN,
+                    )
+                finally:
+                    os.close(fd)
 
     def _read(self):
         if not self.state_file.exists():
@@ -211,7 +256,7 @@ class PairingStore:
                 list(requested_scopes),
         }
 
-        with self.lock:
+        with self._locked():
             state = self._read()
             state["pending"] = pending
             self._write(state)
@@ -238,7 +283,7 @@ class PairingStore:
         self,
         device_id,
     ):
-        with self.lock:
+        with self._locked():
             state = self._read()
             device = (
                 state
@@ -265,7 +310,7 @@ class PairingStore:
         if now is None:
             now = int(time.time())
 
-        with self.lock:
+        with self._locked():
             state = self._read()
 
             device = (
@@ -295,7 +340,7 @@ class PairingStore:
         self,
         device_id,
     ):
-        with self.lock:
+        with self._locked():
             state = self._read()
 
             device = (
@@ -359,7 +404,7 @@ class PairingStore:
                 400,
             )
 
-        with self.lock:
+        with self._locked():
             state = self._read()
             pending = state.get(
                 "pending"

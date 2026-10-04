@@ -33,6 +33,67 @@ from v2_tls import (
 MAX_JSON_BODY = 32 * 1024
 
 
+def _json_body_length(headers):
+    """
+    Validate HTTP framing for the small JSON bodies accepted by v2.
+
+    Transfer-Encoding is deliberately unsupported. Pairing requests
+    must carry exactly one canonical decimal Content-Length.
+    """
+    if headers.get_all(
+        "Transfer-Encoding"
+    ):
+        raise PairingError(
+            "invalid_json",
+            400,
+        )
+
+    lengths = (
+        headers.get_all(
+            "Content-Length"
+        )
+        or []
+    )
+
+    if len(lengths) != 1:
+        raise PairingError(
+            "invalid_json",
+            400,
+        )
+
+    raw_length = lengths[0]
+
+    if (
+        not isinstance(
+            raw_length,
+            str,
+        )
+        or not raw_length
+        or not raw_length.isascii()
+        or not raw_length.isdecimal()
+    ):
+        raise PairingError(
+            "invalid_json",
+            400,
+        )
+
+    length = int(
+        raw_length,
+        10,
+    )
+
+    if (
+        length <= 0
+        or length > MAX_JSON_BODY
+    ):
+        raise PairingError(
+            "invalid_json",
+            400,
+        )
+
+    return length
+
+
 class V2Handler(BaseHTTPRequestHandler):
     server_version = "LogosObserverV2/0"
     protocol_version = "HTTP/1.1"
@@ -43,6 +104,28 @@ class V2Handler(BaseHTTPRequestHandler):
         *args,
     ):
         return
+
+    def send_error(
+        self,
+        code,
+        message=None,
+        explain=None,
+    ):
+        if code == 501:
+            self.send_json(
+                404,
+                {
+                    "error":
+                        "not_found",
+                },
+            )
+            return
+
+        super().send_error(
+            code,
+            message,
+            explain,
+        )
 
     def send_json(
         self,
@@ -67,28 +150,16 @@ class V2Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def read_json(self):
-        raw_length = self.headers.get(
-            "Content-Length"
-        )
-
         try:
-            length = int(
-                raw_length or "0"
+            length = _json_body_length(
+                self.headers
             )
-        except ValueError:
-            raise PairingError(
-                "invalid_json",
-                400,
-            )
-
-        if (
-            length <= 0
-            or length > MAX_JSON_BODY
-        ):
-            raise PairingError(
-                "invalid_json",
-                400,
-            )
+        except PairingError:
+            # Invalid framing can leave unread bytes on a persistent
+            # connection. Do not attempt to parse another request on
+            # that connection.
+            self.close_connection = True
+            raise
 
         body = self.rfile.read(length)
 
@@ -115,6 +186,32 @@ class V2Handler(BaseHTTPRequestHandler):
             )
 
         return payload
+
+    def authenticated_route_path(self):
+        """
+        Return only the routing path while preserving self.path
+        unchanged for HMAC authentication.
+
+        The signed request-target remains byte-for-byte the value
+        received by BaseHTTPRequestHandler, including query ordering
+        and percent encoding.
+        """
+        target = self.path
+
+        if (
+            not isinstance(target, str)
+            or not target.startswith("/")
+            or "#" in target
+            or target.endswith("?")
+        ):
+            return None
+
+        path, _, _query = target.partition("?")
+
+        if not path:
+            return None
+
+        return path
 
     def authenticate(
         self,
@@ -185,7 +282,11 @@ class V2Handler(BaseHTTPRequestHandler):
             )
             return
 
-        if self.path == "/v2/status":
+        route_path = (
+            self.authenticated_route_path()
+        )
+
+        if route_path == "/v2/status":
             auth = self.authenticate()
 
             if auth is None:
@@ -205,7 +306,7 @@ class V2Handler(BaseHTTPRequestHandler):
             )
             return
 
-        if self.path == "/v2/network":
+        if route_path == "/v2/network":
             self.send_read_section(
                 required_scope=
                     "network.status.read",
@@ -217,7 +318,7 @@ class V2Handler(BaseHTTPRequestHandler):
             )
             return
 
-        if self.path == "/v2/mining":
+        if route_path == "/v2/mining":
             self.send_read_section(
                 required_scope=
                     "mining.status.read",
@@ -229,7 +330,7 @@ class V2Handler(BaseHTTPRequestHandler):
             )
             return
 
-        if self.path == "/v2/rewards":
+        if route_path == "/v2/rewards":
             self.send_read_section(
                 required_scope=
                     "rewards.status.read",
@@ -315,7 +416,11 @@ class V2Handler(BaseHTTPRequestHandler):
         )
 
     def do_DELETE(self):
-        if self.path != "/v2/device":
+        route_path = (
+            self.authenticated_route_path()
+        )
+
+        if route_path != "/v2/device":
             self.send_json(
                 404,
                 {
