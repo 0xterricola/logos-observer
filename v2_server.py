@@ -7,6 +7,7 @@ from http.server import (
     ThreadingHTTPServer,
 )
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from v2_auth import (
     AuthError,
@@ -20,6 +21,10 @@ from v2_pairing import (
 from v2_node import (
     DEFAULT_UPSTREAM,
     LogosNodeReader,
+)
+from v2_chat import (
+    DEFAULT_CHAT_BRIDGE,
+    BasecampChatReader,
 )
 from v2_status import (
     build_status_snapshot,
@@ -342,6 +347,116 @@ class V2Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if route_path == "/v2/chat/conversations":
+            self.send_read_section(
+                required_scope=
+                    "chat.read",
+                read=(
+                    self.server
+                    .chat_reader
+                    .read_conversations
+                ),
+            )
+            return
+
+        if route_path == "/v2/chat/messages":
+            auth = self.authenticate(
+                required_scope=
+                    "chat.read",
+            )
+
+            if auth is None:
+                return
+
+            parsed = urlsplit(
+                self.path
+            )
+
+            query = parse_qs(
+                parsed.query,
+                keep_blank_values=True,
+            )
+
+            if (
+                set(query)
+                - {"convo", "since_ms"}
+            ):
+                self.send_json(
+                    400,
+                    {
+                        "error":
+                            "invalid_query",
+                    },
+                )
+                return
+
+            convo_values = query.get(
+                "convo",
+                [],
+            )
+
+            since_values = query.get(
+                "since_ms",
+                [],
+            )
+
+            if (
+                len(convo_values) != 1
+                or not convo_values[0]
+                or len(since_values) > 1
+            ):
+                self.send_json(
+                    400,
+                    {
+                        "error":
+                            "invalid_query",
+                    },
+                )
+                return
+
+            since_ms = None
+
+            if since_values:
+                since_text = (
+                    since_values[0]
+                )
+
+                if (
+                    not since_text
+                    or not since_text.isascii()
+                    or not since_text.isdigit()
+                ):
+                    self.send_json(
+                        400,
+                        {
+                            "error":
+                                "invalid_query",
+                        },
+                    )
+                    return
+
+                since_ms = int(
+                    since_text
+                )
+
+            try:
+                payload = (
+                    self.server
+                    .chat_reader
+                    .read_messages(
+                        convo_values[0],
+                        since_ms=since_ms,
+                    )
+                )
+            except Exception:
+                payload = None
+
+            self.send_json(
+                200,
+                payload,
+            )
+            return
+
         # /v2/blend remains reserved until its
         # v2 data contract is activated.
         self.send_json(
@@ -485,6 +600,15 @@ def main():
         ),
     )
 
+    parser.add_argument(
+        "--chat-bridge",
+        default=DEFAULT_CHAT_BRIDGE,
+        help=(
+            "local Basecamp JSON-RPC bridge; "
+            "keep this bound to loopback"
+        ),
+    )
+
     args = parser.parse_args()
 
     advertise_host = (
@@ -517,6 +641,12 @@ def main():
         )
     )
 
+    chat_reader = (
+        BasecampChatReader(
+            upstream=args.chat_bridge,
+        )
+    )
+
     server = ThreadingHTTPServer(
         (
             args.host,
@@ -535,6 +665,10 @@ def main():
 
     server.status_reader = (
         status_reader
+    )
+
+    server.chat_reader = (
+        chat_reader
     )
 
     context = create_server_ssl_context(

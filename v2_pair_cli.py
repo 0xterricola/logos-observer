@@ -9,6 +9,7 @@ from pathlib import Path
 from v2_pairing import (
     PairingStore,
     V2_READ_SCOPES,
+    V2_SUPPORTED_SCOPES,
 )
 from v2_tls import ensure_tls_identity
 
@@ -136,10 +137,10 @@ def main():
         "--scope",
         action="append",
         dest="scopes",
-        choices=V2_READ_SCOPES,
+        choices=V2_SUPPORTED_SCOPES,
         help=(
             "scope to offer; repeat for multiple. "
-            "Defaults to all v2 read scopes."
+            "Defaults to core node read scopes."
         ),
     )
 

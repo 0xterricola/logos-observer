@@ -112,6 +112,60 @@ class ObserverV2HTTPSServerTests(
             TestReader()
         )
 
+        class TestChatReader:
+            def read_conversations(self):
+                return {
+                    "available": True,
+                    "conversations": [
+                        {
+                            "convo_id": "c1",
+                            "kind": "direct",
+                            "message_count": 2,
+                            "last_activity_ms": 200,
+                            "preview": "gm",
+                            "history_only": False,
+                        }
+                    ],
+                }
+
+            def read_messages(
+                self,
+                convo_id,
+                *,
+                since_ms=None,
+            ):
+                messages = [
+                    {
+                        "content": "first",
+                        "from_self": False,
+                        "timestamp_ms": 100,
+                        "sender": "peer",
+                    },
+                    {
+                        "content": "second",
+                        "from_self": True,
+                        "timestamp_ms": 200,
+                    },
+                ]
+
+                if since_ms is not None:
+                    messages = [
+                        message
+                        for message in messages
+                        if message["timestamp_ms"]
+                        > since_ms
+                    ]
+
+                return {
+                    "available": True,
+                    "convo_id": convo_id,
+                    "messages": messages,
+                }
+
+        self.server.chat_reader = (
+            TestChatReader()
+        )
+
         server_context = (
             create_server_ssl_context(
                 identity[
@@ -331,6 +385,7 @@ class ObserverV2HTTPSServerTests(
                     f"{self.port}"
                 ),
                 pin="sha256/test",
+                scopes=scopes,
             )
         )
 
@@ -796,6 +851,244 @@ class ObserverV2HTTPSServerTests(
             },
         )
 
+
+    def test_chat_conversations_route(
+        self,
+    ):
+        import time
+
+        pairing = self.pair_device(
+            [
+                "chat.read",
+            ]
+        )
+
+        path = "/v2/chat/conversations"
+        now = int(time.time())
+
+        headers = self.signed_headers(
+            pairing,
+            method="GET",
+            path=path,
+            nonce_byte=30,
+            timestamp=now,
+        )
+
+        status, body, tls = (
+            self.request(
+                "GET",
+                path,
+                headers=headers,
+            )
+        )
+
+        self.assertEqual(
+            tls,
+            "TLSv1.3",
+        )
+
+        self.assertEqual(
+            status,
+            200,
+        )
+
+        self.assertEqual(
+            json.loads(body),
+            {
+                "available": True,
+                "conversations": [
+                    {
+                        "convo_id": "c1",
+                        "kind": "direct",
+                        "message_count": 2,
+                        "last_activity_ms": 200,
+                        "preview": "gm",
+                        "history_only": False,
+                    }
+                ],
+            },
+        )
+
+    def test_chat_messages_route(
+        self,
+    ):
+        import time
+
+        pairing = self.pair_device(
+            [
+                "chat.read",
+            ]
+        )
+
+        now = int(time.time())
+
+        cases = [
+            (
+                "/v2/chat/messages?convo=c1",
+                31,
+                [
+                    {
+                        "content": "first",
+                        "from_self": False,
+                        "timestamp_ms": 100,
+                        "sender": "peer",
+                    },
+                    {
+                        "content": "second",
+                        "from_self": True,
+                        "timestamp_ms": 200,
+                    },
+                ],
+            ),
+            (
+                (
+                    "/v2/chat/messages?"
+                    "convo=c1&since_ms=100"
+                ),
+                32,
+                [
+                    {
+                        "content": "second",
+                        "from_self": True,
+                        "timestamp_ms": 200,
+                    },
+                ],
+            ),
+        ]
+
+        for path, nonce_byte, messages in cases:
+            headers = self.signed_headers(
+                pairing,
+                method="GET",
+                path=path,
+                nonce_byte=nonce_byte,
+                timestamp=now,
+            )
+
+            status, body, tls = (
+                self.request(
+                    "GET",
+                    path,
+                    headers=headers,
+                )
+            )
+
+            self.assertEqual(
+                tls,
+                "TLSv1.3",
+            )
+
+            self.assertEqual(
+                status,
+                200,
+            )
+
+            self.assertEqual(
+                json.loads(body),
+                {
+                    "available": True,
+                    "convo_id": "c1",
+                    "messages": messages,
+                },
+            )
+
+    def test_chat_scope_denied(
+        self,
+    ):
+        import time
+
+        pairing = self.pair_device(
+            [
+                "node.status.read",
+            ]
+        )
+
+        path = "/v2/chat/conversations"
+
+        headers = self.signed_headers(
+            pairing,
+            method="GET",
+            path=path,
+            nonce_byte=33,
+            timestamp=int(time.time()),
+        )
+
+        status, body, _ = (
+            self.request(
+                "GET",
+                path,
+                headers=headers,
+            )
+        )
+
+        self.assertEqual(
+            status,
+            403,
+        )
+
+        self.assertEqual(
+            json.loads(body),
+            {
+                "error": "scope",
+            },
+        )
+
+    def test_chat_messages_reject_invalid_query(
+        self,
+    ):
+        import time
+
+        pairing = self.pair_device(
+            [
+                "chat.read",
+            ]
+        )
+
+        now = int(time.time())
+
+        paths = [
+            "/v2/chat/messages",
+            "/v2/chat/messages?convo=",
+            "/v2/chat/messages?convo=c1&since_ms=nope",
+            "/v2/chat/messages?convo=c1&since_ms=-1",
+            "/v2/chat/messages?convo=c1&since_ms=%2B1",
+            "/v2/chat/messages?convo=c1&since_ms=1.5",
+            "/v2/chat/messages?convo=c1&extra=x",
+            "/v2/chat/messages?convo=c1&convo=c2",
+            (
+                "/v2/chat/messages?"
+                "convo=c1&since_ms=1&since_ms=2"
+            ),
+        ]
+
+        for index, path in enumerate(paths):
+            headers = self.signed_headers(
+                pairing,
+                method="GET",
+                path=path,
+                nonce_byte=40 + index,
+                timestamp=now,
+            )
+
+            status, body, _ = (
+                self.request(
+                    "GET",
+                    path,
+                    headers=headers,
+                )
+            )
+
+            self.assertEqual(
+                status,
+                400,
+            )
+
+            self.assertEqual(
+                json.loads(body),
+                {
+                    "error": "invalid_query",
+                },
+            )
 
     def test_dedicated_read_routes(
         self,

@@ -26,6 +26,11 @@ V2_READ_SCOPES = (
     "rewards.status.read",
 )
 
+V2_SUPPORTED_SCOPES = (
+    *V2_READ_SCOPES,
+    "chat.read",
+)
+
 V2_RESERVED_SCOPES = (
     "blend.status.read",
 )
@@ -225,7 +230,7 @@ class PairingStore:
 
         unknown = (
             set(requested_scopes)
-            - set(V2_READ_SCOPES)
+            - set(V2_SUPPORTED_SCOPES)
         )
 
         if unknown:
