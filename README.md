@@ -4,6 +4,8 @@ A local-first, read-only sidecar for securely exposing a limited view of a Logos
 
 The first integration target is a read-only client that connects directly to a user's own Logos node.
 
+Observer v2 also supports an optional read-only Basecamp Chat capability through the local Logos JSON-RPC bridge.
+
 Observer currently contains the original v1 reference protocol and the newer v2 protocol designed for clients such as Casberi.
 
 ## Goal
@@ -26,7 +28,27 @@ Logos node API
 
 The raw Logos API stays bound to localhost.
 
-The client never receives arbitrary access to the Logos API.
+When Basecamp Chat support is enabled, the Logos JSON-RPC bridge also remains loopback-only:
+
+```text
+iPhone / client
+       |
+       | TLS 1.3 + pairing + HMAC
+       v
+Logos Observer v2
+       |
+       | localhost only
+       v
+logos-json-rpc-bridge
+127.0.0.1:8645
+       |
+       v
+Basecamp chat_module
+```
+
+Observer rejects non-loopback Chat bridge targets.
+
+The client never receives arbitrary access to the Logos API or JSON-RPC bridge.
 
 Observer exposes only explicitly implemented, sanitized, read-only endpoints.
 
@@ -46,7 +68,7 @@ Each Observer installation manages its own paired devices.
 
 Observer v1 remains implemented and available as the original reference protocol.
 
-Observer v2 is now implemented in the repository and has been exercised end-to-end against a live Logos node across two physical machines.
+Observer v2 is now implemented in the repository and has been exercised end-to-end against both a live Logos node and a live Basecamp Chat runtime.
 
 The v2 reference implementation currently includes:
 
@@ -75,8 +97,13 @@ The v2 reference implementation currently includes:
 - full lowercase 64-character block-tip identifiers
 - voucher counts without exposing voucher commitments or nullifiers
 - interoperability vectors for HMAC, SPKI pinning, certificate parsing, and pairing QR format
+- optional read-only Basecamp Chat integration
+- explicit opt-in `chat.read` scope
+- loopback-only Basecamp JSON-RPC bridge enforcement
+- JSON-RPC 2.0 version and response-ID validation
+- allowlisted conversation metadata and validated message-history routes
 
-The current test suite contains 61 tests covering protocol, TLS, pairing, HMAC authentication, replay protection, node mapping, status semantics, dedicated routes, HTTP framing, cross-process state locking, upstream isolation, concurrency, revocation, and integration behavior.
+The current test suite contains 70 tests covering protocol, TLS, pairing, HMAC authentication, replay protection, node mapping, status semantics, dedicated routes, HTTP framing, cross-process state locking, upstream isolation, concurrency, revocation, Basecamp Chat mapping, Chat scope enforcement, Chat query validation, loopback bridge enforcement, JSON-RPC envelope validation, and integration behavior.
 
 The reference implementation has also been validated live with:
 
@@ -114,7 +141,39 @@ DELETE /v2/device
 401 revoked on subsequent use
 ```
 
-Casberi interoperability is the next client-side integration step.
+The Basecamp Chat path has also been validated live using a local client that exercised the same Observer v2 pairing and request-authentication protocol expected by a client application:
+
+```text
+pair with chat.read
+  |
+  v
+TLS 1.3
+  |
+  v
+HMAC-signed GET /v2/chat/conversations
+  |
+  v
+Logos Observer v2
+  |
+  v
+localhost json_rpc_bridge
+  |
+  v
+live Basecamp chat_module
+  |
+  v
+real conversation metadata
+  |
+  v
+HMAC-signed GET /v2/chat/messages
+  |
+  v
+real message history
+```
+
+The hardened live test returned HTTP `200` over TLS 1.3 with `available: true` and eight real Basecamp conversations at test time.
+
+The Observer/Basecamp server-side path is implemented and validated. Testing the actual Casberi iOS/TestFlight client remains a client-side integration step.
 
 ## Observer v2
 
@@ -269,7 +328,7 @@ Clients should store that credential in device-local secure storage such as iOS 
 
 ### v2 Read Scopes
 
-Current read scopes:
+Default/core read scopes:
 
 ```text
 node.status.read
@@ -277,6 +336,14 @@ network.status.read
 mining.status.read
 rewards.status.read
 ```
+
+Additional supported opt-in scope:
+
+```text
+chat.read
+```
+
+`chat.read` is deliberately not included in the default pairing offer. It must be explicitly offered by the Observer operator and explicitly requested by the client.
 
 Reserved:
 
@@ -305,6 +372,8 @@ Current reference routes:
 | `GET` | `/v2/network` | device HMAC | `network.status.read` |
 | `GET` | `/v2/mining` | device HMAC | `mining.status.read` |
 | `GET` | `/v2/rewards` | device HMAC | `rewards.status.read` |
+| `GET` | `/v2/chat/conversations` | device HMAC | `chat.read` |
+| `GET` | `/v2/chat/messages?convo=<id>&since_ms=<ts>` | device HMAC | `chat.read` |
 | `DELETE` | `/v2/device` | device HMAC | self-revocation |
 | `GET` | `/v2/blend` | reserved | not active |
 
@@ -399,6 +468,139 @@ A request without the required scope returns:
 with HTTP `403`.
 
 `/v2/blend` remains reserved until its client-facing schema is frozen.
+
+### Basecamp Chat Read Path
+
+Observer v2 can optionally expose a sanitized, read-only view of Basecamp Chat through the Logos JSON-RPC bridge.
+
+Related component:
+
+- [logos-co/logos-json-rpc-bridge](https://github.com/logos-co/logos-json-rpc-bridge)
+
+The default bridge endpoint is:
+
+```text
+http://127.0.0.1:8645/rpc
+```
+
+The bridge is a local interoperability layer, not the remote trust boundary.
+
+Observer remains responsible for:
+
+```text
+TLS 1.3
+SPKI-pinned Observer identity
+pairing
+per-device HMAC authentication
+nonce/replay protection
+scope authorization
+revocation
+```
+
+Observer rejects non-loopback `--chat-bridge` targets. The raw JSON-RPC bridge is not intended to be exposed directly to the LAN.
+
+The Observer Chat adapter invokes only read operations:
+
+```text
+chat_module.get_address
+chat_module.list_conversations
+chat_module.get_messages
+```
+
+It does not initialize or shut down Chat, send messages, create conversations, modify groups, delete conversations, or export Chat keys.
+
+Observer receives decrypted message content from the local Chat module in memory in order to return it to an authorized `chat.read` client, but it does not take custody of Chat cryptographic keys.
+
+#### Conversations
+
+```text
+GET /v2/chat/conversations
+```
+
+Example response:
+
+```json
+{
+  "available": true,
+  "conversations": [
+    {
+      "convo_id": "94dcb46431ce714934af6a6b159a6a32",
+      "message_count": 1,
+      "last_activity_ms": 1791346739627,
+      "kind": "direct",
+      "preview": "example",
+      "history_only": false
+    }
+  ]
+}
+```
+
+Conversation fields are mapped from the Basecamp `chat_module` response rather than exposing an arbitrary JSON-RPC object.
+
+#### Messages
+
+```text
+GET /v2/chat/messages?convo=<id>
+```
+
+Incremental reads use:
+
+```text
+GET /v2/chat/messages?convo=<id>&since_ms=<timestamp>
+```
+
+Example response:
+
+```json
+{
+  "available": true,
+  "convo_id": "94dcb46431ce714934af6a6b159a6a32",
+  "messages": [
+    {
+      "content": "hello",
+      "from_self": false,
+      "timestamp_ms": 1791346739627,
+      "sender": "peer-address"
+    }
+  ]
+}
+```
+
+Message behavior:
+
+- results are returned oldest-first
+- `since_ms` means strictly newer than the supplied timestamp
+- `since_ms` must be a non-negative ASCII decimal integer
+- when `since_ms` is omitted, at most the newest 500 messages are returned
+- `sender` is omitted for messages where `from_self` is `true`
+
+If Basecamp Chat has not been initialized and `chat_module.get_address` is empty, both Chat read routes return HTTP `200` with:
+
+```json
+{
+  "available": false,
+  "reason": "chat_not_started"
+}
+```
+
+The current Observer Chat API uses authenticated HTTP polling. JSON-RPC bridge event subscriptions are not exposed through Observer v2 at this time.
+
+#### Running a Chat-capable Observer
+
+A Chat-capable Observer can run on the same machine as Basecamp while keeping the bridge on loopback:
+
+```bash
+LAN_IP=192.168.x.x
+.venv/bin/python v2_server.py --host 0.0.0.0 --port 8444 --advertise-host "$LAN_IP" --state-dir .v2-state-chat-dev --chat-bridge http://127.0.0.1:8645/rpc
+```
+
+A Chat-only pairing offer can then be created explicitly:
+
+```bash
+.venv/bin/python v2_pair_cli.py --state-dir .v2-state-chat-dev --host "$LAN_IP" --port 8444 --name "Basecamp Chat" --scope chat.read
+```
+
+This pairing does not implicitly grant node, network, mining, or rewards scopes.
 
 ### Rewards Privacy Boundary
 
