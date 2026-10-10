@@ -469,6 +469,35 @@ with HTTP `403`.
 
 `/v2/blend` remains reserved until its client-facing schema is frozen.
 
+### v2 Rewards and Consensus Telemetry
+
+GET /v2/rewards requires the rewards.status.read scope.
+
+The optional v2_rewards_collector.py collects sanitized mining
+and consensus information from the local Logos daemon.
+
+Additional response fields:
+
+- mining_balance: mining balance in LGO
+- mining_notes: number of mining notes
+- consensus.pow_eligible_notes: leader-aged PoW notes
+- consensus.pow_eligible_balance: eligible PoW balance in LGO
+- consensus.pow_aging_notes: PoW notes still aging
+- consensus.wallet_eligible_notes: eligible wallet notes
+- consensus.wallet_eligible_balance: eligible wallet balance in LGO
+
+The collector writes a timestamped snapshot to
+/run/logos-observer-rewards/snapshot.json.
+
+Snapshots refresh approximately every 60 seconds.
+Observer ignores snapshots older than 120 seconds.
+
+The collector exposes aggregated values only.
+It does not expose private keys, individual notes, or signing operations.
+
+The authenticated API response still requires end-to-end
+client verification.
+
 ### Basecamp Chat Read Path
 
 Observer v2 can optionally expose a sanitized, read-only view of Basecamp Chat through the Logos JSON-RPC bridge.
@@ -1321,6 +1350,38 @@ Do not expose pairing material through a network endpoint.
 
 Do not publish a live bootstrap URI.
 
+### Optional rewards collector deployment
+
+The rewards collector runs independently of the Observer HTTPS server.
+
+Tested Valcraft configuration:
+
+- Collector: v2_rewards_collector.py
+- Snapshot: /run/logos-observer-rewards/snapshot.json
+- Collector account: craftval
+- Collector group: logos-observer
+- Snapshot directory permissions: 0750
+- Snapshot file permissions: 0640
+- Collection interval: approximately 60 seconds
+- Maximum snapshot age: 120 seconds
+
+The collector runs through a systemd oneshot service and timer.
+It accesses the local Logos daemon using logosctl.
+
+On Valcraft, logosctl uses a Unix socket under /tmp. The
+collector therefore requires PrivateTmp=false.
+
+The AppImage version of logosctl also required FUSE mounting.
+The tested deployment uses an extracted executable under /opt
+to retain PrivateDevices=true and ProtectSystem=strict.
+
+Observer runs under its separate unprivileged account and reads
+only the sanitized snapshot. It does not need direct access to
+the Logos wallet keystore.
+
+These settings describe the tested deployment. Other installations
+should review paths, permissions, and their own threat models.
+
 ### Run v1 and v2 side by side
 
 For migration/testing, keep v1 on `8081` and explicitly stage v2 on another port:
@@ -1376,7 +1437,7 @@ This repository contains:
 
 The v2 implementation has been exercised against a running Logos node over a real LAN connection.
 
-The current automated suite contains 61 passing tests.
+The current automated suite contains 77 passing tests and 12 passing subtests.
 
 The remaining work is primarily release and client interoperability work:
 

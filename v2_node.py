@@ -5,6 +5,7 @@ import re
 import threading
 import time
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import (
@@ -23,6 +24,10 @@ TIP_RE = re.compile(
     r"^[0-9a-fA-F]{64}$"
 )
 
+DEFAULT_REWARDS_SNAPSHOT = Path(
+    "/run/logos-observer-rewards/snapshot.json"
+)
+
 
 class LogosNodeReader:
     """
@@ -39,6 +44,7 @@ class LogosNodeReader:
         timeout=4.0,
         cache_ttl=10.0,
         fetch_json=None,
+        rewards_snapshot=DEFAULT_REWARDS_SNAPSHOT,
     ):
         self.upstream = (
             upstream.rstrip("/")
@@ -47,6 +53,9 @@ class LogosNodeReader:
         self.timeout = timeout
         self.cache_ttl = cache_ttl
         self.fetch_json = fetch_json
+        self.rewards_snapshot = Path(
+            rewards_snapshot
+        )
 
         self._cache = {}
         self._cache_lock = threading.RLock()
@@ -168,6 +177,40 @@ class LogosNodeReader:
         return format(
             number,
             "f",
+        )
+
+    @staticmethod
+    def _atomic_lgo_string(value):
+        if isinstance(value, bool):
+            raise ValueError(
+                "invalid atomic LGO amount"
+            )
+
+        if isinstance(value, int):
+            atoms = value
+        elif (
+            isinstance(value, str)
+            and re.fullmatch(
+                r"-?[0-9]+",
+                value,
+            )
+        ):
+            atoms = int(value)
+        else:
+            raise ValueError(
+                "invalid atomic LGO amount"
+            )
+
+        number = (
+            Decimal(atoms)
+            / Decimal(1_000_000_000)
+        )
+
+        return (
+            format(number, "f")
+            .rstrip("0")
+            .rstrip(".")
+            or "0"
         )
 
     @staticmethod
@@ -372,7 +415,156 @@ class LogosNodeReader:
                 armed,
         }
 
+    def _read_rewards_snapshot(self):
+        try:
+            raw = json.loads(
+                self.rewards_snapshot.read_text()
+            )
+        except (
+            FileNotFoundError,
+            PermissionError,
+            OSError,
+            json.JSONDecodeError,
+        ):
+            return None
+
+        if not isinstance(raw, dict):
+            return None
+
+        collected_at = raw.get("collected_at")
+
+        if (
+            isinstance(collected_at, bool)
+            or not isinstance(collected_at, int)
+            or not 0 <= time.time() - collected_at <= 120
+        ):
+            return None
+
+        mining_notes = raw.get(
+            "mining_notes"
+        )
+        consensus = raw.get(
+            "consensus"
+        )
+
+        if (
+            isinstance(mining_notes, bool)
+            or not isinstance(
+                mining_notes,
+                int,
+            )
+            or not isinstance(
+                consensus,
+                dict,
+            )
+        ):
+            return None
+
+        integer_fields = (
+            "pow_eligible_notes",
+            "pow_aging_notes",
+            "wallet_eligible_notes",
+        )
+
+        parsed = {}
+
+        for field in integer_fields:
+            value = consensus.get(field)
+
+            if (
+                isinstance(value, bool)
+                or not isinstance(
+                    value,
+                    int,
+                )
+            ):
+                return None
+
+            parsed[field] = value
+
+        try:
+            pow_balance = (
+                self._atomic_lgo_string(
+                    consensus.get(
+                        "pow_eligible_balance_atoms"
+                    )
+                )
+            )
+            wallet_balance = (
+                self._atomic_lgo_string(
+                    consensus.get(
+                        "wallet_eligible_balance_atoms"
+                    )
+                )
+            )
+        except ValueError:
+            return None
+
+        return {
+            "mining_notes":
+                mining_notes,
+            "consensus": {
+                "pow_eligible_notes":
+                    parsed[
+                        "pow_eligible_notes"
+                    ],
+                "pow_eligible_balance":
+                    pow_balance,
+                "pow_aging_notes":
+                    parsed[
+                        "pow_aging_notes"
+                    ],
+                "wallet_eligible_notes":
+                    parsed[
+                        "wallet_eligible_notes"
+                    ],
+                "wallet_eligible_balance":
+                    wallet_balance,
+            },
+        }
+
     def read_rewards(self):
+        pow_status = self._fetch(
+            "/pow/status"
+        )
+
+        auto_claim = pow_status.get(
+            "auto_claim"
+        )
+
+        if not isinstance(
+            auto_claim,
+            dict,
+        ):
+            raise ValueError(
+                "invalid auto-claim state"
+            )
+
+        targets = auto_claim.get(
+            "targets"
+        )
+
+        mining_balance = None
+
+        if (
+            isinstance(targets, list)
+            and targets
+            and isinstance(
+                targets[0],
+                dict,
+            )
+            and targets[0].get(
+                "balance"
+            ) is not None
+        ):
+            mining_balance = (
+                self._atomic_lgo_string(
+                    targets[0].get(
+                        "balance"
+                    )
+                )
+            )
+
         claimable = self._fetch(
             "/pow/rewards/claimable"
         )
@@ -445,7 +637,9 @@ class LogosNodeReader:
             )
         )
 
-        return {
+        result = {
+            "mining_balance":
+                mining_balance,
             "claimable_tickets":
                 tickets,
             "slots_until_expiry":
@@ -455,6 +649,15 @@ class LogosNodeReader:
             "total_claimable":
                 total_claimable,
         }
+
+        snapshot = (
+            self._read_rewards_snapshot()
+        )
+
+        if snapshot is not None:
+            result.update(snapshot)
+
+        return result
 
     def read_blend(self):
         raise RuntimeError(

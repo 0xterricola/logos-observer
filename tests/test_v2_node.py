@@ -57,6 +57,11 @@ class ObserverV2NodeReaderTests(
                     True,
                 "auto_claim": {
                     "is_armed": True,
+                    "targets": [
+                        {
+                            "balance": 3831721456,
+                        },
+                    ],
                 },
             },
             (
@@ -284,6 +289,77 @@ class ObserverV2NodeReaderTests(
             },
         )
 
+    def test_rewards_snapshot_is_sanitized(
+        self,
+    ):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        reader, _ = (
+            self.make_reader()
+        )
+
+        with TemporaryDirectory() as tmp:
+            snapshot = (
+                Path(tmp)
+                / "snapshot.json"
+            )
+
+            snapshot.write_text(
+                """{
+                  "collected_at": __TIMESTAMP__,
+                  "mining_notes": 293,
+                  "consensus": {
+                    "pow_eligible_notes": 255,
+                    "pow_eligible_balance_atoms": "3623374900",
+                    "pow_aging_notes": 38,
+                    "wallet_eligible_notes": 277,
+                    "wallet_eligible_balance_atoms": "4794055131"
+                  }
+                }""".replace("__TIMESTAMP__", str(int(__import__("time").time())))
+            )
+
+            reader.rewards_snapshot = (
+                snapshot
+            )
+
+            result = (
+                reader.read_rewards()
+            )
+
+        self.assertEqual(
+            result["mining_notes"],
+            293,
+        )
+
+        self.assertEqual(
+            result["consensus"],
+            {
+                "pow_eligible_notes":
+                    255,
+                "pow_eligible_balance":
+                    "3.6233749",
+                "pow_aging_notes":
+                    38,
+                "wallet_eligible_notes":
+                    277,
+                "wallet_eligible_balance":
+                    "4.794055131",
+            },
+        )
+
+        serialized = repr(result)
+
+        self.assertNotIn(
+            "pow_eligible_balance_atoms",
+            serialized,
+        )
+
+        self.assertNotIn(
+            "wallet_eligible_balance_atoms",
+            serialized,
+        )
+
     def test_rewards_are_sanitized(
         self,
     ):
@@ -298,6 +374,8 @@ class ObserverV2NodeReaderTests(
         self.assertEqual(
             result,
             {
+                "mining_balance":
+                    "3.831721456",
                 "claimable_tickets":
                     2,
                 "slots_until_expiry":
@@ -422,3 +500,71 @@ class ObserverV2NodeReaderTests(
 
 if __name__ == "__main__":
     unittest.main()
+
+class RewardsSnapshotFreshnessTests(unittest.TestCase):
+    def test_stale_snapshot_is_rejected(self):
+        import json
+        import tempfile
+        import time
+        from pathlib import Path
+        from v2_node import LogosNodeReader
+
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot = Path(tmp) / "snapshot.json"
+            snapshot.write_text(json.dumps({
+                "collected_at": int(time.time()) - 3600,
+                "mining_notes": 10,
+                "consensus": {
+                    "pow_eligible_notes": 5,
+                    "pow_eligible_balance_atoms": "1000000000",
+                    "pow_aging_notes": 5,
+                    "wallet_eligible_notes": 5,
+                    "wallet_eligible_balance_atoms": "1000000000"
+                }
+            }))
+
+            reader = LogosNodeReader(
+                rewards_snapshot=snapshot
+            )
+
+            self.assertIsNone(
+                reader._read_rewards_snapshot()
+            )
+
+class RewardsSnapshotTimestampTests(unittest.TestCase):
+
+    def test_missing_and_future_timestamps_are_rejected(self):
+        import json
+        import tempfile
+        import time
+        from pathlib import Path
+        from v2_node import LogosNodeReader
+
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot = Path(tmp) / "snapshot.json"
+            reader = LogosNodeReader(rewards_snapshot=snapshot)
+
+            data = {
+                "mining_notes": 1,
+                "consensus": {
+                    "pow_eligible_notes": 0,
+                    "pow_eligible_balance_atoms": "0",
+                    "pow_aging_notes": 1,
+                    "wallet_eligible_notes": 0,
+                    "wallet_eligible_balance_atoms": "0"
+                }
+            }
+
+            # Missing timestamp
+            snapshot.write_text(json.dumps(data))
+            self.assertIsNone(reader._read_rewards_snapshot())
+
+            # Future timestamp
+            data["collected_at"] = int(time.time()) + 3600
+            snapshot.write_text(json.dumps(data))
+            self.assertIsNone(reader._read_rewards_snapshot())
+
+            # Fresh timestamp
+            data["collected_at"] = int(time.time())
+            snapshot.write_text(json.dumps(data))
+            self.assertIsNotNone(reader._read_rewards_snapshot())
