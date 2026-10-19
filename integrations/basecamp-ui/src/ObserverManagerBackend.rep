@@ -1,0 +1,12 @@
+class ObserverManagerBackend
+{
+    PROP(bool ready READONLY)
+    PROP(bool healthBusy READONLY)
+    PROP(QString healthStatus READONLY)
+    PROP(QString healthDetails READONLY)
+
+    SLOT(void checkHealth(
+        QString endpoint,
+        QString caCert,
+        QString spkiPin))
+}
