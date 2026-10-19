@@ -14,4 +14,15 @@ logos_module(
     SOURCES
         src/logos_observer_impl.h
         src/logos_observer_impl.cpp
+        src/observer_health.h
+        src/observer_health.cpp
+)
+
+find_package(CURL REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+
+target_link_libraries(logos_observer_module_plugin
+    PRIVATE
+        CURL::libcurl
+        nlohmann_json::nlohmann_json
 )
