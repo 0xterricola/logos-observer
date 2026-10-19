@@ -1,159 +1,201 @@
-# Logos Observer — Basecamp Chat → Casberi Setup Guide
+# Logos Observer — Basecamp Chat to Casberi (CLI Setup)
 
-**Status:** Target user experience / planned onboarding flow  
-**Audience:** People who use Basecamp Chat and want to read their chats on a phone  
-**Goal:** Connect Casberi to an existing Basecamp Chat session **without using Terminal, copying certificates, or configuring network ports**.
+**Status:** Current CLI-based setup (developer preview)  
+**Tested setup:** macOS (Apple Silicon), Logos Basecamp Chat, local JSON-RPC bridge, and a Casberi iOS build supporting Observer v2 Chat pairing  
+**Purpose:** Read your existing Basecamp Chat conversations in Casberi on the same local network.
 
-> **Important:** This document describes the experience we want to ship, **not the setup available today**. The current integration works with a separately started Observer and technical configuration. One-click startup, automated configuration, in-app QR display, and device management are not yet complete.
+This guide uses the **standalone Logos Observer v2 Python CLI**. You do **not** need to build or install the separate `logos_observer` or `logos_observer_ui` Basecamp plugins for this Chat-only setup. No automatic UI setup or service management is assumed.
 
-## The intended experience
+**Current limitation:** This connection is **read-only**. Keep using Basecamp Chat on your computer to send messages. Your computer, Basecamp Chat, local bridge, and Observer must stay running while Casberi reads chats.
 
-**Open Basecamp Chat → Connect Mobile Device → Enable Observer → Scan QR in Casberi → Read messages.**
+## What you need
 
-### Before you begin
+- A Mac with **Logos Basecamp** installed and **Chat already working** (open Chat and confirm your conversations are visible). Install Basecamp using the [official instructions](https://docs.logos.co/basecamp/install-logos-basecamp) if needed.
+- A compatible **Casberi iOS/TestFlight build** that supports Observer v2 and the `chat.read` capability, installed on your iPhone.
+- The **Logos JSON-RPC bridge** (`json_rpc_bridge`) installed and loaded in the **same Basecamp instance** as Chat, listening at **`127.0.0.1:8645`**. The Observer repository does **not** install this module automatically. Obtain and install it via your Basecamp module distribution or from its maintainer before continuing. No verified public download command is provided here.
+- Git, Python 3 with `venv` and `pip`, a terminal, and an internet connection for the initial install.
+- Mac and iPhone on the **same trusted Wi-Fi/LAN**. Avoid guest networks, VPN isolation, and networks that block device-to-device connections.
+- Optional: `qrencode` to print a scannable QR directly in Terminal.
 
-- Basecamp is installed on your computer and Chat opens with your existing conversations.
-- Casberi is installed on your iPhone, using a build that supports Observer pairing and reading Chat.
-- Your computer and iPhone are connected to the same local network for the initial release.
-- Your computer stays powered on, Basecamp Chat remains available, and Observer is running while your phone accesses those chats.
+You do **not** need to create another Chat identity or register another RLN membership for Observer. Use the existing working Basecamp Chat session. You do not need to start a separate `logosctl` Chat daemon.
 
-You **do not** need to create a second Chat account or register a separate RLN membership for Observer. Basecamp Chat remains responsible for Chat identity and sending messages. Observer provides an authorized, read-only connection for the phone.
+## Step 1 — Check Basecamp Chat and the local bridge
 
-## Setup: step by step
+Open Basecamp, load **Chat**, and check that your conversations appear. Ensure the `json_rpc_bridge` core module is loaded in **Settings → Module Inspector** (if installed). Do not expose its port to your network; it must remain localhost-only.
 
-### 1. Open Basecamp Chat
+In Terminal, check the bridge port:
 
-Launch **Basecamp** on your computer and open **Chat**. Check that your conversations load.
+```bash
+nc -z 127.0.0.1 8645 && echo "Bridge port is reachable"
+```
 
-**Expected result:** You can see your existing Chat conversations in Basecamp.
+**Expected:** `Bridge port is reachable`. This tests only whether the local port is open; it does **not** establish that the Chat module is initialized or returning conversations. If the command fails, resolve the Basecamp bridge installation/loading before continuing.
 
-If Chat isn't set up, complete its normal onboarding first. Observer should not substitute for Chat account setup.
+## Step 2 — Download Logos Observer
 
-### 2. Choose “Connect Mobile Device”
+Run these commands in Terminal:
 
-In Basecamp Chat, open **Settings → Connect Mobile Device** (proposed navigation). Basecamp opens **Observer Manager** or offers to install/enable it as part of the guided flow.
+```bash
+mkdir -p ~/Developer
+cd ~/Developer
+git clone https://github.com/0xterricola/logos-observer.git
+cd logos-observer
+```
 
-The page explains:
+If you already cloned the repository, use your existing copy instead; do not clone over it.
 
-> **Connect your phone to Basecamp Chat**  
-> Logos Observer makes your existing conversations available to an authorized mobile app. Your Chat identity stays with Basecamp. Mobile access is read-only in this release.
+The CLI implementation is in `v2_server.py` and `v2_pair_cli.py`. No `.lgx` package or Nix build is required for this CLI path.
 
-Select **Get Started**.
+## Step 3 — Install the Python dependency
 
-**Expected result:** The setup assistant opens without asking for an HTTPS URL, a certificate path, or an SPKI pin.
+From inside the `logos-observer` directory:
 
-### 3. Check the Chat connection
+```bash
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
+```
 
-Observer Manager checks the required components automatically:
+The repository currently declares `cryptography` as its Python dependency. Keep using the `.venv/bin/python` executable in the commands below.
 
-- Basecamp Chat is available.
-- The Chat integration exposes the necessary read-only methods.
-- The local Chat bridge can retrieve permitted conversation data.
+## Step 4 — Determine the Mac's LAN address
 
-Show a simple result such as **Chat connected**. If a check fails, provide one understandable action (for example, **Open Chat**, **Enable Chat Integration**, or **Try Again**).
+With your Mac on the same Wi-Fi/LAN as the iPhone:
 
-**Expected result:** A clear **Ready to enable Observer** state. The user does not interact with JSON-RPC or manually configure a bridge.
+```bash
+LAN_IP=$(ipconfig getifaddr en0)
+printf 'Mac LAN IP: %s\n' "$LAN_IP"
+```
 
-### 4. Enable Observer
+**Expected:** an address such as `192.168.1.20` (yours will be different). If it is empty, `en0` is not your active interface; find your current LAN IP in **System Settings → Network** and use it manually for `LAN_IP`:
 
-Select **Enable Observer**.
+```bash
+LAN_IP="192.168.1.20"
+```
 
-Observer Manager automatically:
+Replace that example with your **actual** Mac LAN IP. Run the command that sets `LAN_IP` again in **each new Terminal tab**, because shell variables do not carry across tabs.
 
-1. Creates or loads an Observer configuration and TLS identity.
-2. Connects its read-only Chat source to the existing Basecamp Chat integration.
-3. Starts an Observer instance **owned by Basecamp** (without taking over an independently running Observer).
-4. Checks its health, TLS identity, and Chat availability separately.
+## Step 5 — Start the Chat-capable Observer
 
-**Expected result:** **Observer running** and **Chat available** appear in the UI. The user should see a short, actionable error if either check fails.
+Keep Basecamp Chat and the JSON-RPC bridge running. In **Terminal tab 1**, from the repo directory:
 
-For users who intentionally operate their own Observer, **Advanced Settings** may offer **Connect to an existing Observer** instead of starting another instance.
+```bash
+cd ~/Developer/logos-observer
+LAN_IP=$(ipconfig getifaddr en0)
 
-### 5. Pair Casberi with a QR code
+./.venv/bin/python v2_server.py \
+  --host 0.0.0.0 \
+  --port 8444 \
+  --advertise-host "$LAN_IP" \
+  --state-dir .v2-state-chat-dev \
+  --chat-bridge http://127.0.0.1:8645/rpc
+```
 
-In Observer Manager, select **Connect Phone** to display a **pairing QR code**.
+**Expected output:** Observer reports that HTTPS is listening, its advertised endpoint, its SPKI pin, and **TLS 1.3 only**. Leave this terminal running. The command creates or reuses the Observer's TLS key and persistent pairing/device state in `.v2-state-chat-dev`.
 
-On your iPhone:
+The port `8444` is the Chat preview example, not the protocol default. Do not forward this port on your router or expose it to the public internet.
 
-1. Open **Casberi**.
-2. Choose **Connect to Observer** (proposed wording; exact labels may change).
-3. Scan the QR code on the computer.
-4. Review and approve the requested **Chat read-only** access.
+### Verify the HTTPS health endpoint
 
-The pairing flow establishes the Observer endpoint, verifies its TLS identity, and grants only the scope needed to read Chat. It must not expose wallet keys, Chat signing material, or Observer private TLS keys in the QR code.
+In **Terminal tab 2**, while Observer is still running in tab 1:
 
-**Expected result:** Both apps show **Connected**, with the paired phone listed in Observer Manager.
+```bash
+cd ~/Developer/logos-observer
+LAN_IP=$(ipconfig getifaddr en0)
 
-### 6. Read messages on your phone
+curl --silent --show-error --fail --max-time 5 \
+  --cacert .v2-state-chat-dev/observer-v2-cert.pem \
+  "https://${LAN_IP}:8444/health"
+```
 
-In Casberi, open **Chat**. Existing authorized conversations and message history load, and incoming messages appear while the computer, Basecamp Chat, and Observer remain available.
+**Expected:**
 
-**Expected result:** A message received by Basecamp Chat also appears in Casberi without manual refresh.
+```json
+{"ok":true,"service":"logos-observer","protocol":"logos-observer-v2"}
+```
 
-**Current feature boundary:** The working Casberi/Observer integration provides **read-only Chat access**. Sending messages from Casberi is not part of this initial setup milestone and must not be presented as available until independently verified.
+This confirms the local Observer HTTPS health endpoint and certificate trust. **It does not confirm that Basecamp Chat reads are available**; that is verified after pairing in Casberi. Do not use `curl -k` to bypass certificate verification.
 
-### 7. Manage or disconnect your phone
+## Step 6 — Create a Chat-only pairing QR
 
-In **Observer Manager → Connected Devices** (planned screen), the user can:
+In **Terminal tab 2**, with tab 1 still running:
 
-- See which devices have Chat read-only access.
-- Disconnect a phone or revoke its authorization.
-- Connect another phone through a new pairing flow.
-- Disable the Basecamp-managed Observer without disrupting Basecamp Chat.
+```bash
+cd ~/Developer/logos-observer
+LAN_IP=$(ipconfig getifaddr en0)
 
-**Expected result:** Revoked devices can no longer read Chat through Observer. Independently managed Observer instances are never stopped by Basecamp's service controls.
+./.venv/bin/python v2_pair_cli.py \
+  --state-dir .v2-state-chat-dev \
+  --host "$LAN_IP" \
+  --port 8444 \
+  --name "Basecamp Chat" \
+  --scope chat.read
+```
 
-## What the finished setup screen should show
+**Expected:** a pairing URI beginning with `logos-observer://pair`, a certificate SPKI pin, an expiration time, and a scope of **`chat.read` only**. If `qrencode` is on your PATH, the command also displays a terminal QR code.
 
-| Item | Healthy state | What it means |
-|---|---|---|
-| Basecamp Chat | **Connected** | Existing Chat account and conversations are available. |
-| Chat bridge | **Available** | Observer can read authorized Chat information. |
-| Observer | **Running** | The HTTPS service is reachable. |
-| Observer identity | **Verified** | The mobile client can authenticate the expected Observer identity. |
-| Mobile device | **Connected — Read-only** | Casberi is paired with the required permission. |
+If you see `qrencode not installed`, on a Mac with Homebrew you can install it with:
 
-These are **separate checks**: an HTTPS health response does not, by itself, prove that the Chat bridge or chat-history retrieval is working.
+```bash
+brew install qrencode
+```
 
-## Troubleshooting language for users
+Then **rerun the pairing command** to produce a fresh QR. You do not need `qrencode` to run the Observer server; it is only for the QR display.
 
-| User sees | Guidance |
-|---|---|
-| **Chat not connected** | Open Basecamp Chat and make sure your conversations load, then retry. |
-| **Chat integration unavailable** | Use **Enable Chat Integration** or follow the in-app repair flow. |
-| **Observer not running** | Select **Try Again**; show technical logs only in Advanced Diagnostics. |
-| **Phone cannot connect** | Put your iPhone and computer on the same local network and check that Observer is running. |
-| **Observer identity changed** | Re-pair from Observer Manager; never bypass certificate or identity verification. |
-| **Messages are not updating** | Verify Basecamp Chat, the read-only bridge, and Observer separately. |
-| **Sending from Casberi unavailable** | Read messages on Casberi; send messages from Basecamp Chat for now. |
+**Important:** The QR / pairing URI contains a temporary pairing secret. It expires after **five minutes** and is intended for one successful pairing. Do not post it in screenshots, chat, GitHub issues, or logs shared with others. If it expires, run the pairing command again.
 
-## Design and security requirements
+## Step 7 — Pair Casberi on your iPhone
 
-- **No Terminal required** for the normal user journey; no manual IP address, port, PEM path, or SPKI pin entry.
-- **No duplicate Chat identity or RLN registration** created by Observer. Existing Basecamp Chat remains the source of truth.
-- **Read-only, least-privilege scope:** pairing grants `chat.read` only when approved; do not expose other Observer data without authorization.
-- **TLS identity verification is mandatory.** Never fall back to an insecure connection to make pairing appear successful.
-- **Keep secrets out of pairing payloads and logs.** Private keys and signing material remain outside Observer's read-only responsibilities.
-- **Ownership-aware service controls:** start/stop only the Observer process managed by Basecamp; preserve independently running CLI services.
-- **CLI/API parity:** the graphical path simplifies setup but does not remove or limit standalone/headless operation.
-- **Clear state and revocation:** tell users whether a phone is authorized, whether Chat is available, and how to revoke access.
+1. Put the iPhone on the **same LAN** as your Mac.
+2. Open a compatible **Casberi** build and its **Observer pairing / add connection** flow (labels may differ by build).
+3. Scan the QR displayed in Terminal.
+4. Review the requested capability; use **Chat read-only (`chat.read`)**.
+5. Complete pairing in Casberi, then open its Chat/conversations view.
 
-## Release checklist — do not publish this as a live how-to until verified
+**Expected:** Casberi shows the conversations available through your active Basecamp Chat session. Messages received in Basecamp Chat should subsequently appear in Casberi while everything remains running. Sending from Casberi is **not** supported by this tested Chat-read integration.
 
-- [x] Standalone Observer can provide read-only Chat data through the Basecamp Chat bridge.
-- [x] Casberi has displayed existing messages and incoming updates in the working integration.
-- [x] Native `logos_observer` module and Observer Manager UI are installable in Basecamp.
-- [x] Observer Manager can check the standalone Observer's HTTPS health and TLS identity.
-- [ ] Provide an obvious entry point from Basecamp Chat to Observer onboarding.
-- [ ] Detect/enable the Chat bridge automatically, without terminal commands.
-- [ ] Start/configure/stop a Basecamp-owned Observer without affecting standalone instances.
-- [ ] Make Observer Chat availability a separate, correctly scoped status indicator.
-- [ ] Generate and display a correct, permission-scoped Casberi pairing QR in Basecamp.
-- [ ] Verify the complete nontechnical pairing flow on a fresh Basecamp installation.
-- [ ] Add device authorization listing and revocation.
-- [ ] Verify user-facing failure and recovery states, including identity change and offline operation.
-- [ ] Keep advanced connection settings available for manually managed installations.
+## Step 8 — Confirm messages are updating
 
-## Definition of done
+With Basecamp Chat, the bridge, Observer, and Casberi running:
 
-A new user with **an already functioning Basecamp Chat account** can open Basecamp, enable Observer, pair Casberi, and receive new chat messages on an iPhone **without opening Terminal, editing a configuration file, registering another RLN membership, or handling certificates manually**. They can later revoke the phone's access from a graphical screen, and disabling Observer does not interrupt Basecamp Chat.
+1. Confirm existing conversations and messages load in Casberi.
+2. Receive a new message in **Basecamp Chat** from a test contact.
+3. Check that the message appears in Casberi without manually re-pairing.
+
+An HTTPS health response alone is not enough: **this is the actual end-to-end Chat verification**.
+
+## Stopping and restarting
+
+To stop the standalone Observer, press **Ctrl+C** in Terminal tab 1. This does **not** stop Basecamp Chat or unregister your RLN membership.
+
+To restart, use the same **Step 5** command and the **same state directory** (`.v2-state-chat-dev`). Previously paired devices can retain their Observer identity and authorization. Don't delete or publish the state directory: it contains a persistent private TLS key and device/authentication state. If you intentionally reset it, expect to pair again.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| `nc -z 127.0.0.1 8645` fails | Basecamp's `json_rpc_bridge` must be installed **and loaded**, and bound to localhost. Verify that Basecamp Chat is running. |
+| `ipconfig getifaddr en0` prints nothing | Get the LAN IP from macOS Network settings, then set `LAN_IP="YOUR_IP"` in each terminal tab. |
+| Observer reports address already in use | Something else occupies port `8444`; stop that instance or choose another port in **both** the server and pairing command. |
+| HTTPS health request fails | Confirm the Observer terminal is still running, the chosen LAN IP and port match, and the certificate path exists. Avoid bypassing TLS validation. |
+| Pairing QR does not appear | Install `qrencode` with Homebrew, then create a **new** pairing offer. |
+| Pairing fails / expires | Use a new QR within five minutes; ensure the iPhone reaches the Mac over the LAN, macOS firewall allows the Observer server, and VPN/guest-network isolation is disabled. Do not ignore an identity mismatch. |
+| Casberi connects but has no chats | Confirm Basecamp Chat conversations are loaded and the JSON-RPC bridge has access to the correct Basecamp instance. Observer `/health` does not diagnose this. |
+| Chat works in Basecamp but not on phone | Check both devices are on the same LAN, that the Chat bridge and Observer remain running, and that the pairing offered `chat.read`. |
+| Sending from Casberi is unavailable | Expected for the current read-only integration; send through Basecamp Chat. |
+
+## Security notes
+
+- This setup gives the paired mobile device access to **decrypted Chat content** via an explicitly authorized read-only capability. Pair only devices you trust.
+- Observer protects its connection with TLS 1.3, a pinned public-key identity, device credentials, and request authentication.
+- The JSON-RPC Chat bridge stays bound to `127.0.0.1`; do **not** bind it publicly or forward it on your router.
+- The pairing QR is **sensitive, temporary authorization material**, not something to share as a screenshot.
+- No wallet, RLN registration, Chat signing keys, or outbound Chat operations are required **by Observer**.
+- Current connection is **local-network only** in this guide. There is no cloud relay or remote-access setup here.
+
+## References
+
+- [Logos Observer repository and CLI documentation](https://github.com/0xterricola/logos-observer)
+- [Observer v2 pairing CLI source](https://github.com/0xterricola/logos-observer/blob/main/v2_pair_cli.py)
+- [Observer v2 server source](https://github.com/0xterricola/logos-observer/blob/main/v2_server.py)
+- [Official Basecamp installation documentation](https://docs.logos.co/basecamp/install-logos-basecamp)
+- [Official Basecamp module installation documentation](https://docs.logos.co/basecamp/install-and-load-a-module-in-logos-basecamp)
