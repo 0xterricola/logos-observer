@@ -27,3 +27,6 @@ observer.py.v1-final
 # macOS
 .DS_Store
 .v2-state*/
+
+# Local Observer Nix build outputs
+/result-observer*
