@@ -1,0 +1,26 @@
+{
+  "name": "logos_observer",
+  "display_name": "Logos Observer",
+  "version": "0.1.0",
+  "description": "Basecamp integration for managing and monitoring Logos Observer",
+  "author": "0xterricola",
+  "type": "core",
+  "interface": "universal",
+  "concurrency": "multi",
+  "category": "system",
+  "main": "logos_observer_plugin",
+  "dependencies": [],
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": []
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
+  }
+}
