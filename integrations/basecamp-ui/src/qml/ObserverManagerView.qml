@@ -174,6 +174,45 @@ Rectangle {
                     color: "#e2e8f0"
                 }
 
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 16
+
+                    Label {
+                        text: "Chat bridge: " + (root.backend
+                            ? root.backend.chatBridgeStatus
+                            : "Unknown")
+                        color: "#cbd5e1"
+                        Layout.fillWidth: true
+                    }
+
+                    Label {
+                        text: "Basecamp Chat: " + (root.backend
+                            ? root.backend.chatStatus
+                            : "Unknown")
+                        color: "#cbd5e1"
+                        Layout.fillWidth: true
+                    }
+
+                    Button {
+                        text: root.backend && root.backend.chatBusy
+                            ? "Checking..."
+                            : "Check Chat"
+                        enabled: !!root.backend
+                            && root.backend.ready
+                            && !root.backend.chatBusy
+                        onClicked: root.backend.checkChatHealth()
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.backend ? root.backend.chatDetails : ""
+                    color: "#94a3b8"
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                }
+
                 ScrollView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true

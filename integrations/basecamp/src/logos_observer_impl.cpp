@@ -8,7 +8,7 @@ LogosObserverImpl::~LogosObserverImpl() = default;
 std::string LogosObserverImpl::getInfo() {
     return R"json({
         "module": "logos_observer",
-        "version": "0.1.1",
+        "version": "0.1.2",
         "managed_service": "not_configured"
     })json";
 }
@@ -28,4 +28,12 @@ std::string LogosObserverImpl::getHealth(
     const std::string& configJson
 ) {
     return probeObserverHealth(configJson);
+}
+
+
+// Implemented in chat_health.cpp.
+std::string probeChatHealth();
+
+std::string LogosObserverImpl::getChatHealth() {
+    return probeChatHealth();
 }

@@ -16,6 +16,8 @@ logos_module(
         src/logos_observer_impl.cpp
         src/observer_health.h
         src/observer_health.cpp
+        src/chat_health.cpp
+        src/chat_health.cpp
 )
 
 find_package(CURL REQUIRED)

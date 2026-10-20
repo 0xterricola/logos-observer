@@ -26,6 +26,8 @@ public slots:
         QString caCert,
         QString spkiPin) override;
 
+    void checkChatHealth() override;
+
 private:
     LogosAPI* m_api;
     LogosModules* m_modules;

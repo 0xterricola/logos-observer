@@ -4,9 +4,15 @@ class ObserverManagerBackend
     PROP(bool healthBusy READONLY)
     PROP(QString healthStatus READONLY)
     PROP(QString healthDetails READONLY)
+    PROP(bool chatBusy READONLY)
+    PROP(QString chatBridgeStatus READONLY)
+    PROP(QString chatStatus READONLY)
+    PROP(QString chatDetails READONLY)
 
     SLOT(void checkHealth(
         QString endpoint,
         QString caCert,
         QString spkiPin))
+
+    SLOT(void checkChatHealth())
 }

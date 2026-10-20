@@ -16,6 +16,10 @@ ObserverManagerBackend::ObserverManagerBackend(
 {
     setReady(true);
     setHealthBusy(false);
+    setChatBusy(false);
+    setChatBridgeStatus(QStringLiteral("Not checked"));
+    setChatStatus(QStringLiteral("Not checked"));
+    setChatDetails(QString());
     setHealthStatus(QStringLiteral("Not checked"));
     setHealthDetails(QStringLiteral(
         "Configure the Observer connection and check its health."));
@@ -118,6 +122,84 @@ void ObserverManagerBackend::checkHealth(
                     guard->setHealthDetails(
                         QString::fromUtf8(
                             document.toJson(QJsonDocument::Indented)));
+                },
+                Qt::QueuedConnection);
+        });
+}
+
+
+void ObserverManagerBackend::checkChatHealth()
+{
+    if (chatBusy())
+        return;
+
+    setChatBusy(true);
+    setChatBridgeStatus(QStringLiteral("Checking..."));
+    setChatStatus(QStringLiteral("Checking..."));
+    setChatDetails(QString());
+
+    QPointer<ObserverManagerBackend> guard(this);
+
+    m_modules->logos_observer.getChatHealthAsyncResult(
+        [guard](logos::AsyncResult<QString> outcome) {
+            const bool succeeded = outcome.ok();
+            const QString result = outcome.value;
+
+            if (!guard)
+                return;
+
+            QMetaObject::invokeMethod(
+                guard.data(),
+                [guard, succeeded, result]() {
+                    if (!guard)
+                        return;
+
+                    guard->setChatBusy(false);
+
+                    if (!succeeded) {
+                        guard->setChatBridgeStatus(
+                            QStringLiteral("Unknown"));
+                        guard->setChatStatus(
+                            QStringLiteral("Unknown"));
+                        guard->setChatDetails(
+                            QStringLiteral("Module call failed."));
+                        return;
+                    }
+
+                    QJsonParseError error;
+                    const QJsonDocument document =
+                        QJsonDocument::fromJson(
+                            result.toUtf8(), &error);
+
+                    if (error.error != QJsonParseError::NoError ||
+                        !document.isObject()) {
+                        guard->setChatBridgeStatus(
+                            QStringLiteral("Unknown"));
+                        guard->setChatStatus(
+                            QStringLiteral("Unknown"));
+                        guard->setChatDetails(
+                            QStringLiteral("Invalid diagnostic response."));
+                        return;
+                    }
+
+                    const QJsonObject response = document.object();
+                    const bool bridge =
+                        response.value("chat_bridge")
+                            .toObject().value("reachable").toBool();
+                    const bool chat =
+                        response.value("basecamp_chat")
+                            .toObject().value("available").toBool();
+
+                    guard->setChatBridgeStatus(
+                        bridge ? QStringLiteral("Responding")
+                               : QStringLiteral("Unavailable"));
+
+                    guard->setChatStatus(
+                        chat ? QStringLiteral("Available")
+                             : QStringLiteral("Unavailable"));
+
+                    guard->setChatDetails(
+                        response.value("reason").toString());
                 },
                 Qt::QueuedConnection);
         });
