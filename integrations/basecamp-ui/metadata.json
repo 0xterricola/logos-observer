@@ -1,0 +1,30 @@
+{
+  "name": "logos_observer_ui",
+  "display_name": "Observer Manager",
+  "version": "0.1.0",
+  "type": "ui_qml",
+  "category": "system",
+  "description": "Graphical setup, monitoring, and management for Logos Observer",
+  "author": "0xterricola",
+  "main": "logos_observer_ui_plugin",
+  "view": "qml/ObserverManagerView.qml",
+  "dependencies": [
+    "logos_observer"
+  ],
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": [
+        "qt6.qtdeclarative"
+      ]
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
+  },
+  "icon": "src/icons/observer.png"
+}
