@@ -19,6 +19,7 @@ ObserverManagerBackend::ObserverManagerBackend(
     setChatBusy(false);
     setChatBridgeStatus(QStringLiteral("Not checked"));
     setChatStatus(QStringLiteral("Not checked"));
+    setConversationsStatus(QStringLiteral("Not checked"));
     setChatDetails(QString());
     setHealthStatus(QStringLiteral("Not checked"));
     setHealthDetails(QStringLiteral(
@@ -136,6 +137,7 @@ void ObserverManagerBackend::checkChatHealth()
     setChatBusy(true);
     setChatBridgeStatus(QStringLiteral("Checking..."));
     setChatStatus(QStringLiteral("Checking..."));
+    setConversationsStatus(QStringLiteral("Checking..."));
     setChatDetails(QString());
 
     QPointer<ObserverManagerBackend> guard(this);
@@ -161,6 +163,8 @@ void ObserverManagerBackend::checkChatHealth()
                             QStringLiteral("Unknown"));
                         guard->setChatStatus(
                             QStringLiteral("Unknown"));
+                        guard->setConversationsStatus(
+                            QStringLiteral("Unknown"));
                         guard->setChatDetails(
                             QStringLiteral("Module call failed."));
                         return;
@@ -176,6 +180,8 @@ void ObserverManagerBackend::checkChatHealth()
                         guard->setChatBridgeStatus(
                             QStringLiteral("Unknown"));
                         guard->setChatStatus(
+                            QStringLiteral("Unknown"));
+                        guard->setConversationsStatus(
                             QStringLiteral("Unknown"));
                         guard->setChatDetails(
                             QStringLiteral("Invalid diagnostic response."));
@@ -198,8 +204,47 @@ void ObserverManagerBackend::checkChatHealth()
                         chat ? QStringLiteral("Available")
                              : QStringLiteral("Unavailable"));
 
-                    guard->setChatDetails(
-                        response.value("reason").toString());
+                    const QString reason =
+                        response.value("reason").toString();
+
+                    const QJsonObject conversations =
+                        response.value("conversations").toObject();
+
+                    const bool readable =
+                        conversations.value("readable").toBool();
+
+                    const int count =
+                        conversations.value("count").toInt(-1);
+
+                    if (!bridge) {
+                        guard->setChatBridgeStatus(
+                            reason == QStringLiteral("bridge_timeout")
+                            ? QStringLiteral("Timed out")
+                            : QStringLiteral("Unavailable"));
+                        guard->setChatStatus(QStringLiteral("Unknown"));
+                    } else if (!chat) {
+                        guard->setChatStatus(
+                            reason == QStringLiteral("chat_not_started")
+                            ? QStringLiteral("Not started")
+                            : reason == QStringLiteral("chat_rpc_timeout")
+                            ? QStringLiteral("Timed out")
+                            : QStringLiteral("Unknown"));
+                    }
+
+                    if (chat && readable && count >= 0) {
+                        guard->setConversationsStatus(
+                            QStringLiteral("Readable (%1)").arg(count));
+                    } else if (!chat) {
+                        guard->setConversationsStatus(
+                            QStringLiteral("Not tested"));
+                    } else {
+                        guard->setConversationsStatus(
+                            reason == QStringLiteral("conversations_timeout")
+                            ? QStringLiteral("Timed out")
+                            : QStringLiteral("Unavailable"));
+                    }
+
+                    guard->setChatDetails(reason);
                 },
                 Qt::QueuedConnection);
         });

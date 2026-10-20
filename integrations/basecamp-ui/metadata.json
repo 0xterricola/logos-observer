@@ -1,7 +1,7 @@
 {
   "name": "logos_observer_ui",
   "display_name": "Observer Manager",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "ui_qml",
   "category": "system",
   "description": "Graphical setup, monitoring, and management for Logos Observer",

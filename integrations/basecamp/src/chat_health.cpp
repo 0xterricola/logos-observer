@@ -9,16 +9,29 @@ using json = nlohmann::json;
 namespace {
 
 constexpr char BRIDGE_URL[] = "http://127.0.0.1:8645/rpc";
-constexpr size_t MAX_RESPONSE_BYTES = 4096;
+constexpr size_t MAX_RESPONSE_BYTES = 1024 * 1024;
+
+struct RpcReply {
+    bool connected = false;
+    bool valid = false;
+    bool timedOut = false;
+    json response;
+};
 
 std::string diagnostic(
-    bool bridgeReachable,
-    bool chatAvailable,
+    bool bridge,
+    bool chat,
+    bool readable,
+    json count,
     const char* reason
 ) {
     return json{
-        {"chat_bridge", {{"reachable", bridgeReachable}}},
-        {"basecamp_chat", {{"available", chatAvailable}}},
+        {"chat_bridge", {{"reachable", bridge}}},
+        {"basecamp_chat", {{"available", chat}}},
+        {"conversations", {
+            {"readable", readable},
+            {"count", count}
+        }},
         {"reason", reason}
     }.dump();
 }
@@ -28,7 +41,7 @@ size_t receiveBody(
 ) {
     auto* body = static_cast<std::string*>(userdata);
 
-    if (size != 0 && count > MAX_RESPONSE_BYTES / size)
+    if (size && count > MAX_RESPONSE_BYTES / size)
         return 0;
 
     const size_t bytes = size * count;
@@ -52,20 +65,20 @@ bool initCurl() {
     return initialized;
 }
 
-} // namespace
+RpcReply callRpc(const char* method, int id) {
+    RpcReply reply;
 
-std::string probeChatHealth() {
     if (!initCurl())
-        return diagnostic(false, false, "curl_init_failed");
+        return reply;
 
     CURL* curl = curl_easy_init();
     if (!curl)
-        return diagnostic(false, false, "curl_init_failed");
+        return reply;
 
     const std::string payload = json{
         {"jsonrpc", "2.0"},
-        {"id", 1},
-        {"method", "chat_module.get_address"}
+        {"id", id},
+        {"method", method}
     }.dump();
 
     std::string body;
@@ -75,7 +88,7 @@ std::string probeChatHealth() {
 
     if (!headers) {
         curl_easy_cleanup(curl);
-        return diagnostic(false, false, "curl_init_failed");
+        return reply;
     }
 
     curl_easy_setopt(curl, CURLOPT_URL, BRIDGE_URL);
@@ -96,48 +109,94 @@ std::string probeChatHealth() {
     const CURLcode code = curl_easy_perform(curl);
 
     long httpStatus = 0;
-    curl_easy_getinfo(
-        curl, CURLINFO_RESPONSE_CODE, &httpStatus);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpStatus);
 
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    if (code != CURLE_OK)
-        return diagnostic(false, false, "bridge_unreachable");
+    reply.timedOut = code == CURLE_OPERATION_TIMEDOUT;
+    reply.connected = code == CURLE_OK;
+
+    if (code != CURLE_OK || httpStatus != 200)
+        return reply;
 
     try {
-        const json response = json::parse(body);
+        json response = json::parse(body);
 
-        if (httpStatus != 200 ||
-            !response.is_object() ||
+        if (!response.is_object() ||
             response.value("jsonrpc", std::string{}) != "2.0" ||
             !response.contains("id") ||
             !response["id"].is_number_integer() ||
-            response["id"].get<int>() != 1) {
-            return diagnostic(
-                false, false, "invalid_bridge_response");
-        }
+            response["id"].get<int>() != id ||
+            (!response.contains("result") &&
+             !response.contains("error")))
+            return reply;
 
-        if (response.contains("error"))
-            return diagnostic(
-                true, false, "chat_rpc_error");
-
-        if (!response.contains("result") ||
-            !response["result"].is_string()) {
-            return diagnostic(
-                true, false, "invalid_chat_response");
-        }
-
-        const bool available =
-            !response["result"].get<std::string>().empty();
-
-        return diagnostic(
-            true,
-            available,
-            available ? "chat_started" : "chat_not_started");
-
+        reply.valid = true;
+        reply.response = std::move(response);
     } catch (...) {
-        return diagnostic(
-            false, false, "invalid_bridge_response");
+        // Invalid JSON-RPC response.
     }
+
+    return reply;
+}
+
+} // namespace
+
+std::string probeChatHealth() {
+    // Probe JSON-RPC independently of Chat initialization.
+    const auto bridge = callRpc(
+        "__observer_probe_nonexistent__", 99);
+
+    if (!bridge.valid)
+        return diagnostic(
+            false, false, false, nullptr,
+            bridge.timedOut ? "bridge_timeout" :
+            bridge.connected ? "invalid_bridge_response" :
+                               "bridge_unreachable");
+
+    const auto address = callRpc("chat_module.get_address", 1);
+
+    if (!address.valid)
+        return diagnostic(
+            true, false, false, nullptr,
+            address.timedOut ? "chat_rpc_timeout" :
+                               "chat_rpc_unavailable");
+
+    if (address.response.contains("error"))
+        return diagnostic(
+            true, false, false, nullptr, "chat_rpc_error");
+
+    if (!address.response.contains("result") ||
+        !address.response["result"].is_string())
+        return diagnostic(
+            true, false, false, nullptr, "invalid_chat_response");
+
+    if (address.response["result"].get<std::string>().empty())
+        return diagnostic(
+            true, false, false, nullptr, "chat_not_started");
+
+    const auto conversations =
+        callRpc("chat_module.list_conversations", 2);
+
+    if (!conversations.valid)
+        return diagnostic(
+            true, true, false, nullptr,
+            conversations.timedOut ? "conversations_timeout" :
+                                     "conversations_unavailable");
+
+    if (conversations.response.contains("error"))
+        return diagnostic(
+            true, true, false, nullptr, "conversations_rpc_error");
+
+    if (!conversations.response.contains("result") ||
+        !conversations.response["result"].is_array())
+        return diagnostic(
+            true, true, false, nullptr,
+            "invalid_conversations_response");
+
+    return diagnostic(
+        true, true, true,
+        conversations.response["result"].size(),
+        "conversations_readable");
 }
