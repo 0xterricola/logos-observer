@@ -8,7 +8,7 @@ LogosObserverImpl::~LogosObserverImpl() = default;
 std::string LogosObserverImpl::getInfo() {
     return R"json({
         "module": "logos_observer",
-        "version": "0.1.2",
+        "version": "0.1.3",
         "managed_service": "not_configured"
     })json";
 }

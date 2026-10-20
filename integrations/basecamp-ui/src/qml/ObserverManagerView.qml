@@ -207,6 +207,15 @@ Rectangle {
 
                 Label {
                     Layout.fillWidth: true
+                    text: "Conversations: " + (root.backend
+                        ? root.backend.conversationsStatus
+                        : "Unknown")
+                    color: "#cbd5e1"
+                    font.pixelSize: 14
+                }
+
+                Label {
+                    Layout.fillWidth: true
                     text: root.backend ? root.backend.chatDetails : ""
                     color: "#94a3b8"
                     font.pixelSize: 12
