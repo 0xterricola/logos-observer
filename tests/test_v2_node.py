@@ -48,6 +48,12 @@ class ObserverV2NodeReaderTests(
                     "tip": TIP,
                 },
             },
+            "/time/info": {
+                "current_slot": 320075,
+                "current_epoch": 120,
+                "slots_per_epoch": 100,
+                "slot_duration_ms": 10000,
+            },
             "/network/info": {
                 "n_peers": 462,
             },
@@ -259,8 +265,68 @@ class ObserverV2NodeReaderTests(
                 "phase": "Following",
                 "height": 9809,
                 "tip": TIP,
+                "slot": 320075,
+                "epoch": 120,
+                "slots_until_next_epoch": 25,
+                "slot_duration_ms": 10000,
             },
         )
+
+    def test_timing_failure_keeps_node_reachable(self):
+        reader, _ = self.make_reader({
+            "/time/info": OSError("timing unavailable"),
+        })
+        node = reader.read_node()
+        self.assertTrue(node["reachable"])
+        for field in (
+            "slot", "epoch",
+            "slots_until_next_epoch", "slot_duration_ms"
+        ):
+            self.assertIsNone(node[field])
+
+    def test_epoch_boundary(self):
+        reader, _ = self.make_reader({
+            "/time/info": {
+                "current_slot": 320100,
+                "current_epoch": 121,
+                "slots_per_epoch": 100,
+                "slot_duration_ms": 10000,
+            },
+        })
+        node = reader.read_node()
+        self.assertEqual(node["slot"], 320100)
+        self.assertEqual(node["epoch"], 121)
+        self.assertEqual(node["slots_until_next_epoch"], 100)
+
+    def test_invalid_timing_values_are_null(self):
+        reader, _ = self.make_reader({
+            "/time/info": {
+                "current_slot": True,
+                "current_epoch": -1,
+                "slots_per_epoch": 0,
+                "slot_duration_ms": "10000",
+            },
+        })
+        node = reader.read_node()
+        self.assertTrue(node["reachable"])
+        self.assertIsNone(node["slot"])
+        self.assertIsNone(node["epoch"])
+        self.assertIsNone(node["slots_until_next_epoch"])
+        self.assertIsNone(node["slot_duration_ms"])
+
+    def test_partial_timing_data(self):
+        reader, _ = self.make_reader({
+            "/time/info": {
+                "current_slot": 320075,
+                "current_epoch": 120,
+                "slot_duration_ms": 10000,
+            },
+        })
+        node = reader.read_node()
+        self.assertEqual(node["slot"], 320075)
+        self.assertEqual(node["epoch"], 120)
+        self.assertIsNone(node["slots_until_next_epoch"])
+        self.assertEqual(node["slot_duration_ms"], 10000)
 
     def test_network_mapping(self):
         reader, _ = (

@@ -320,6 +320,33 @@ class LogosNodeReader:
         ):
             height = None
 
+        # Clock timing is independent of the latest block slot.
+        # Missing timing data must not make the node unreachable.
+        timing = {}
+        try:
+            response = self._fetch("/time/info")
+            if isinstance(response, dict):
+                timing = response
+        except (OSError, URLError, ValueError, KeyError, TypeError):
+            pass
+
+        def unsigned(name, minimum=0):
+            value = timing.get(name)
+            if type(value) is int and value >= minimum:
+                return value
+            return None
+
+        slot = unsigned("current_slot")
+        epoch = unsigned("current_epoch")
+        slots_per_epoch = unsigned("slots_per_epoch", 1)
+        duration = unsigned("slot_duration_ms", 1)
+
+        remaining = (
+            slots_per_epoch - (slot % slots_per_epoch)
+            if slot is not None and slots_per_epoch is not None
+            else None
+        )
+
         return {
             "reachable": True,
             "phase": phase,
@@ -327,6 +354,10 @@ class LogosNodeReader:
             "tip": self._tip(
                 info.get("tip")
             ),
+            "slot": slot,
+            "epoch": epoch,
+            "slots_until_next_epoch": remaining,
+            "slot_duration_ms": duration,
         }
 
     def read_network(self):
