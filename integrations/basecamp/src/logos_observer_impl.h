@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include "managed_observer_service.h"
 
 #include <logos_module_context.h>
 
@@ -18,9 +19,16 @@ public:
     // Read-only local Basecamp Chat diagnostics.
     std::string getChatHealth();
 
+    std::string startService();
+    std::string getServiceStatus();
+    std::string stopService();
+
     // Read-only local Basecamp Chat diagnostics.
 
 protected:
     void onContextReady() override;
     LogosShutdown aboutToUnload() override;
+
+private:
+    ManagedObserverService managedService_;
 };

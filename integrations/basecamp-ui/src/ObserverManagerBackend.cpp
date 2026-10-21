@@ -15,6 +15,11 @@ ObserverManagerBackend::ObserverManagerBackend(
       m_modules(new LogosModules(m_api))
 {
     setReady(true);
+    setServiceBusy(false);
+    setServiceStatus(QStringLiteral("Not checked"));
+    setServiceDetails(QStringLiteral(
+        "Managed Observer status has not been checked."));
+
     setHealthBusy(false);
     setChatBusy(false);
     setChatBridgeStatus(QStringLiteral("Not checked"));
@@ -245,6 +250,133 @@ void ObserverManagerBackend::checkChatHealth()
                     }
 
                     guard->setChatDetails(reason);
+                },
+                Qt::QueuedConnection);
+        });
+}
+
+
+void ObserverManagerBackend::applyServiceResult(
+    bool succeeded,
+    const QString& payload)
+{
+    setServiceBusy(false);
+
+    if (!succeeded) {
+        setServiceStatus(QStringLiteral("Module call failed"));
+        setServiceDetails(QStringLiteral(
+            "Could not communicate with the native Observer module."));
+        return;
+    }
+
+    QJsonParseError error;
+    const QJsonDocument document =
+        QJsonDocument::fromJson(payload.toUtf8(), &error);
+
+    if (error.error != QJsonParseError::NoError ||
+        !document.isObject()) {
+        setServiceStatus(QStringLiteral("Invalid response"));
+        setServiceDetails(payload);
+        return;
+    }
+
+    const QJsonObject response = document.object();
+    const QString state = response.value("state").toString();
+
+    setServiceStatus(
+        state.isEmpty() ? QStringLiteral("Unknown") : state);
+
+    setServiceDetails(response.value("detail").toString());
+}
+
+
+void ObserverManagerBackend::refreshServiceStatus()
+{
+    if (serviceBusy())
+        return;
+
+    setServiceBusy(true);
+    setServiceStatus(QStringLiteral("Checking..."));
+    setServiceDetails(QString());
+
+    QPointer<ObserverManagerBackend> guard(this);
+
+    m_modules->logos_observer.getServiceStatusAsyncResult(
+        [guard](logos::AsyncResult<QString> outcome) {
+            const bool succeeded = outcome.ok();
+            const QString payload = outcome.value;
+
+            if (!guard)
+                return;
+
+            QMetaObject::invokeMethod(
+                guard.data(),
+                [guard, succeeded, payload]() {
+                    if (guard)
+                        guard->applyServiceResult(
+                            succeeded, payload);
+                },
+                Qt::QueuedConnection);
+        });
+}
+
+
+void ObserverManagerBackend::startService()
+{
+    if (serviceBusy())
+        return;
+
+    setServiceBusy(true);
+    setServiceStatus(QStringLiteral("Starting..."));
+    setServiceDetails(QString());
+
+    QPointer<ObserverManagerBackend> guard(this);
+
+    m_modules->logos_observer.startServiceAsyncResult(
+        [guard](logos::AsyncResult<QString> outcome) {
+            const bool succeeded = outcome.ok();
+            const QString payload = outcome.value;
+
+            if (!guard)
+                return;
+
+            QMetaObject::invokeMethod(
+                guard.data(),
+                [guard, succeeded, payload]() {
+                    if (guard)
+                        guard->applyServiceResult(
+                            succeeded, payload);
+                },
+                Qt::QueuedConnection);
+        });
+}
+
+
+void ObserverManagerBackend::stopService()
+{
+    if (serviceBusy())
+        return;
+
+    setServiceBusy(true);
+    setServiceStatus(QStringLiteral("Stopping..."));
+    setServiceDetails(QString());
+
+    QPointer<ObserverManagerBackend> guard(this);
+
+    m_modules->logos_observer.stopServiceAsyncResult(
+        [guard](logos::AsyncResult<QString> outcome) {
+            const bool succeeded = outcome.ok();
+            const QString payload = outcome.value;
+
+            if (!guard)
+                return;
+
+            QMetaObject::invokeMethod(
+                guard.data(),
+                [guard, succeeded, payload]() {
+                    if (guard)
+                        guard->applyServiceResult(
+                            succeeded, payload);
                 },
                 Qt::QueuedConnection);
         });

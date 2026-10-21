@@ -14,11 +14,14 @@ logos_module(
     SOURCES
         src/logos_observer_impl.h
         src/logos_observer_impl.cpp
+        src/managed_observer_service.h
+        src/managed_observer_service.cpp
         src/observer_health.h
         src/observer_health.cpp
         src/chat_health.cpp
         src/chat_health.cpp
 )
+
 
 find_package(CURL REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
