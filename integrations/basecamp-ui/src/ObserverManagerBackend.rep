@@ -1,6 +1,10 @@
 class ObserverManagerBackend
 {
     PROP(bool ready READONLY)
+    PROP(bool serviceBusy READONLY)
+    PROP(QString serviceStatus READONLY)
+    PROP(QString serviceDetails READONLY)
+
     PROP(bool healthBusy READONLY)
     PROP(QString healthStatus READONLY)
     PROP(QString healthDetails READONLY)
@@ -14,6 +18,10 @@ class ObserverManagerBackend
         QString endpoint,
         QString caCert,
         QString spkiPin))
+
+    SLOT(void refreshServiceStatus())
+    SLOT(void startService())
+    SLOT(void stopService())
 
     SLOT(void checkChatHealth())
 }

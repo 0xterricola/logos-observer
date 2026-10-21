@@ -12,10 +12,15 @@ Rectangle {
     readonly property var backend:
         logos ? logos.module("logos_observer_ui") : null
 
-    ColumnLayout {
+    ScrollView {
+        id: pageScroll
         anchors.fill: parent
-        anchors.margins: 32
-        spacing: 20
+        anchors.margins: 24
+        clip: true
+
+        ColumnLayout {
+            width: pageScroll.availableWidth
+            spacing: 20
 
         Label {
             text: "Logos Observer"
@@ -28,6 +33,88 @@ Rectangle {
             text: "Service monitoring and configuration"
             color: "#9ca3af"
             font.pixelSize: 14
+        }
+
+        GroupBox {
+            title: "Managed Observer"
+            Layout.fillWidth: true
+
+            label: Label {
+                text: "Managed Observer"
+                color: "#e2e8f0"
+                font.pixelSize: 15
+                font.bold: true
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 12
+
+                Label {
+                    text: "Service: " + (root.backend
+                        ? root.backend.serviceStatus
+                        : "Backend unavailable")
+                    color: "#e2e8f0"
+                    font.pixelSize: 16
+                    font.bold: true
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.backend
+                        ? root.backend.serviceDetails
+                        : ""
+                    color: "#94a3b8"
+                    wrapMode: Text.Wrap
+                }
+
+                RowLayout {
+                    spacing: 12
+
+                    Button {
+                        text: "Start Observer"
+                        enabled: !!root.backend
+                            && root.backend.ready
+                            && !root.backend.serviceBusy
+                            && root.backend.serviceStatus !== "running"
+                            && root.backend.serviceStatus !== "starting"
+
+                        onClicked: root.backend.startService()
+                    }
+
+                    Button {
+                        text: "Stop Observer"
+                        enabled: !!root.backend
+                            && root.backend.ready
+                            && !root.backend.serviceBusy
+                            && (root.backend.serviceStatus === "running"
+                                || root.backend.serviceStatus === "starting")
+
+                        onClicked: root.backend.stopService()
+                    }
+
+                    Button {
+                        text: root.backend && root.backend.serviceBusy
+                            ? "Working..."
+                            : "Refresh Status"
+
+                        enabled: !!root.backend
+                            && root.backend.ready
+                            && !root.backend.serviceBusy
+
+                        onClicked: root.backend.refreshServiceStatus()
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Development runtime configuration required. "
+                        + "Portable Python runtime is not bundled yet."
+                    color: "#64748b"
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                }
+            }
         }
 
         GroupBox {
@@ -158,7 +245,7 @@ Rectangle {
                 font.bold: true
             }
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.preferredHeight: 340
 
             ColumnLayout {
                 anchors.fill: parent
@@ -243,6 +330,7 @@ Rectangle {
                     }
                 }
             }
+        }
         }
     }
 }

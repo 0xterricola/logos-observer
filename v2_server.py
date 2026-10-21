@@ -699,11 +699,20 @@ def main():
 
     print("TLS: 1.3 only")
 
+    import signal
+
+    def handle_sigterm(_signum, _frame):
+        raise KeyboardInterrupt
+
+    previous_handler = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, handle_sigterm)
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        signal.signal(signal.SIGTERM, previous_handler)
         server.server_close()
 
 

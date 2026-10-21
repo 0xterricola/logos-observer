@@ -28,7 +28,14 @@ public slots:
 
     void checkChatHealth() override;
 
+    void refreshServiceStatus() override;
+    void startService() override;
+    void stopService() override;
+
 private:
+    void applyServiceResult(
+        bool succeeded,
+        const QString& payload);
     LogosAPI* m_api;
     LogosModules* m_modules;
 };
