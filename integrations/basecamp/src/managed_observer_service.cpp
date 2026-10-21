@@ -32,7 +32,20 @@ bool ManagedObserverService::runningLocked() {
 
     if (result == 0) return true;
 
+    const int previousPid = pid_;
     pid_ = -1;
+
+    if (result == previousPid) {
+        if (WIFEXITED(childStatus)) {
+            lastFailure_ = "Observer exited unexpectedly (code " +
+                std::to_string(WEXITSTATUS(childStatus)) + ")";
+        } else if (WIFSIGNALED(childStatus)) {
+            lastFailure_ = "Observer terminated unexpectedly (signal " +
+                std::to_string(WTERMSIG(childStatus)) + ")";
+        }
+    } else {
+        lastFailure_ = "Unable to verify managed child process";
+    }
 #endif
     return false;
 }
@@ -44,6 +57,9 @@ ManagedObserverResult ManagedObserverService::status() {
         return {true, "running", "Managed process is alive", pid_};
     }
 
+    if (!lastFailure_.empty()) {
+        return {false, "error", lastFailure_, 0};
+    }
     return {true, "stopped", "No managed process", 0};
 }
 
@@ -59,6 +75,8 @@ ManagedObserverResult ManagedObserverService::start(
     if (runningLocked()) {
         return {false, "running", "Observer already started", pid_};
     }
+
+    lastFailure_.clear();
 
     const fs::path python(pythonPath);
     const fs::path script = fs::path(runtimeDir) / "v2_server.py";
@@ -126,6 +144,14 @@ ManagedObserverResult ManagedObserverService::start(
 
     pid_ = static_cast<int>(child);
 
+    // Detect immediate interpreter and startup failures.
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        usleep(100000);
+        if (!runningLocked()) {
+            return {false, "error", lastFailure_, 0};
+        }
+    }
+
     return {true, "starting", "Observer process launched", pid_};
 #endif
 }
@@ -147,7 +173,8 @@ ManagedObserverResult ManagedObserverService::stop() {
     // Give the server time to close cleanly and flush state.
     for (int attempt = 0; attempt < 50; ++attempt) {
         if (!runningLocked()) {
-            return {true, "stopped", "Observer stopped gracefully", 0};
+            lastFailure_.clear();
+        return {true, "stopped", "Observer stopped gracefully", 0};
         }
         usleep(100000);
     }
@@ -162,6 +189,7 @@ ManagedObserverResult ManagedObserverService::stop() {
         pid_ = -1;
     }
 
+    lastFailure_.clear();
     return {true, "stopped", "Observer stopped after timeout", 0};
 #endif
 }

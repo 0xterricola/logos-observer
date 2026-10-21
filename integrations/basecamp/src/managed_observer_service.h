@@ -27,4 +27,5 @@ private:
 
     std::mutex mutex_;
     int pid_ = -1;
+    std::string lastFailure_;
 };
