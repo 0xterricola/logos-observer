@@ -64,7 +64,7 @@ ManagedObserverResult ManagedObserverService::status() {
 }
 
 ManagedObserverResult ManagedObserverService::start(
-    const std::string& pythonPath,
+    const std::string& executablePath,
     const std::string& runtimeDir
 ) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -78,14 +78,32 @@ ManagedObserverResult ManagedObserverService::start(
 
     lastFailure_.clear();
 
-    const fs::path python(pythonPath);
-    const fs::path script = fs::path(runtimeDir) / "v2_server.py";
+    const fs::path executable(executablePath);
+    const bool pythonMode = !runtimeDir.empty();
 
-    if (!python.is_absolute() || !fs::is_regular_file(python)) {
-        return {false, "error", "Invalid absolute Python interpreter path", 0};
+    if (!executable.is_absolute() ||
+        !fs::is_regular_file(executable) ||
+        access(executable.c_str(), X_OK) != 0) {
+        return {
+            false, "error",
+            "Observer executable missing or not executable: " +
+                executable.string(),
+            0
+        };
     }
-    if (!script.is_absolute() || !fs::is_regular_file(script)) {
-        return {false, "error", "Invalid absolute Observer runtime directory", 0};
+
+    fs::path script;
+
+    if (pythonMode) {
+        script = fs::path(runtimeDir) / "v2_server.py";
+
+        if (!script.is_absolute() || !fs::is_regular_file(script)) {
+            return {
+                false, "error",
+                "Invalid absolute Observer runtime directory",
+                0
+            };
+        }
     }
 
     const char* home = std::getenv("HOME");
@@ -111,13 +129,19 @@ ManagedObserverResult ManagedObserverService::start(
     }
 
     std::vector<std::string> arguments = {
-        python.string(),
-        script.string(),
+        executable.string()
+    };
+
+    if (pythonMode) {
+        arguments.push_back(script.string());
+    }
+
+    arguments.insert(arguments.end(), {
         "--host", "127.0.0.1",
         "--port", "18446",
         "--state-dir", stateDir.string(),
         "--chat-bridge", "http://127.0.0.1:8645/rpc"
-    };
+    });
 
     std::vector<char*> argv;
     for (auto& argument : arguments) {

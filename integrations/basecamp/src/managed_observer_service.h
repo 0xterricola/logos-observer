@@ -15,7 +15,7 @@ public:
     ~ManagedObserverService();
 
     ManagedObserverResult start(
-        const std::string& pythonPath,
+        const std::string& executablePath,
         const std::string& runtimeDir
     );
 
