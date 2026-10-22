@@ -7,19 +7,29 @@
 
   outputs = inputs@{ logos-module-builder, ... }:
     let
-      pkgs = logos-module-builder.inputs.nixpkgs.legacyPackages.aarch64-darwin;
-
-      python = pkgs.python3.withPackages (ps: [
-        ps.pyinstaller
-        ps.cryptography
-      ]);
-
-      portableRuntime = pkgs.stdenvNoCC.mkDerivation {
+      portableRuntimeFor = { pkgs, system }:
+        let
+          isDarwin = system == "aarch64-darwin";
+          python = pkgs.python3.withPackages (ps: [
+            ps.pyinstaller
+            ps.cryptography
+          ]);
+        in pkgs.stdenvNoCC.mkDerivation {
         pname = "logos-observer-portable";
         version = "0.1.4";
 
         src = ./runtime;
-        nativeBuildInputs = [ python pkgs.darwin.system_cmds pkgs.cctools pkgs.darwin.sigtool ];
+        nativeBuildInputs =
+          [ python ]
+          ++ pkgs.lib.optionals isDarwin [
+            pkgs.darwin.system_cmds
+            pkgs.cctools
+            pkgs.darwin.sigtool
+          ]
+          ++ pkgs.lib.optionals (!isDarwin) [
+            pkgs.patchelf
+            pkgs.binutils
+          ];
 
         dontConfigure = true;
         dontBuild = true;
@@ -37,7 +47,6 @@
             --clean \
             --onedir \
             --name logos-observer \
-            --target-arch arm64 \
             --paths "$PWD" \
             --distpath "$out" \
             --workpath "$TMPDIR/pyinstaller-work" \
@@ -46,6 +55,7 @@
 
           test -x "$out/logos-observer/logos-observer"
 
+        '' + pkgs.lib.optionalString isDarwin ''
           # Repair Nix-derived OpenSSL paths after PyInstaller collection.
           internal="$out/logos-observer/_internal"
           rust="$internal/cryptography/hazmat/bindings/_rust.abi3.so"
@@ -79,6 +89,7 @@
             codesign --force --sign - "$binary"
           done
 
+        '' + ''
           runHook postInstall
         '';
       };
@@ -97,8 +108,23 @@
         cp -v ${./runtime}/requirements.txt \
           "$out/share/logos/observer-runtime/"
 
-        cp -R ${portableRuntime}/logos-observer \
-          "$out/share/logos/observer-runtime/portable-macos-arm64"
       '';
+
+      postFixup = { pkgs, system }:
+        let
+          supported =
+            system == "aarch64-darwin" ||
+            system == "x86_64-linux";
+
+          runtimeName =
+            if system == "aarch64-darwin"
+            then "portable-macos-arm64"
+            else "portable-linux-x86_64";
+        in pkgs.lib.optionalString supported ''
+          mkdir -p "$out/share/logos/observer-runtime"
+
+          cp -R ${portableRuntimeFor { inherit pkgs system; }}/logos-observer \
+            "$out/share/logos/observer-runtime/${runtimeName}"
+        '';
     };
 }
