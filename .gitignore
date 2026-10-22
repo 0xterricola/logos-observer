@@ -30,3 +30,5 @@ observer.py.v1-final
 
 # Local Observer Nix build outputs
 /result-observer*
+
+/integrations/basecamp/.portable-build/
