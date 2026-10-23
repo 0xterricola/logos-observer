@@ -47,6 +47,12 @@ echo "=== PORTABLE RUNTIME SMOKE TEST ==="
   BIN="$TEST/assets/lidl/observer-runtime/portable-macos-arm64/logos-observer"
   test -x "$BIN"
 
+  echo "=== BUNDLED PAIRING CLI SMOKE TEST ==="
+  PAIR_HELP="$("$BIN" pair --help)"
+  grep -q -- '--json' <<< "$PAIR_HELP"
+  grep -q -- '--existing-identity' <<< "$PAIR_HELP"
+  echo "PASS: Bundled pairing CLI"
+
   PORT="$(python3 - <<'PYPORT'
 import socket
 with socket.socket() as sock:

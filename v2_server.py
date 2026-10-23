@@ -717,4 +717,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "pair":
+        sys.argv.pop(1)
+        from v2_pair_cli import main as pairing_main
+        pairing_main()
+    else:
+        main()
