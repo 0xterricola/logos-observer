@@ -1,0 +1,117 @@
+name: Observer Portable
+
+on:
+  push:
+    branches:
+      - feat/observer-portable-linux
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-package:
+    name: Build Linux x86_64 LGX
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Build Linux package
+        run: |
+          nix build -L \
+            ./integrations/basecamp#packages.x86_64-linux.lgx-portable \
+            --out-link result-linux
+
+      - name: Inspect Linux package
+        run: |
+          PKG="result-linux/logos-logos_observer-module-lib.lgx"
+          test -f "$PKG"
+          ls -lh "$PKG"
+          tar -tzf "$PKG" |
+            grep 'portable-linux-x86_64/logos-observer'
+
+      - name: Verify LGX integrity
+        run: |
+          nix run github:logos-co/logos-package#lgx -- \
+            verify result-linux/logos-logos_observer-module-lib.lgx
+
+
+      - name: Smoke-test Linux Observer runtime
+        run: |
+          set -euo pipefail
+
+          TEST="$(mktemp -d)"
+          PID=""
+
+          cleanup() {
+            if [[ -n "$PID" ]]; then
+              kill "$PID" 2>/dev/null || true
+              wait "$PID" 2>/dev/null || true
+            fi
+            rm -rf "$TEST"
+          }
+          trap cleanup EXIT
+
+          tar -xzf result-linux/logos-logos_observer-module-lib.lgx -C "$TEST"
+
+          BIN="$TEST/assets/lidl/observer-runtime/portable-linux-x86_64/logos-observer"
+          test -x "$BIN"
+
+          PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+
+          env -i HOME="$TEST" PATH="/usr/bin:/bin" TMPDIR="/tmp" \
+            "$BIN" \
+            --host 127.0.0.1 \
+            --port "$PORT" \
+            --state-dir "$TEST/state" \
+            > "$TEST/observer.log" 2>&1 &
+
+          PID=$!
+          HEALTH=000
+
+          for i in {1..40}; do
+            HEALTH="$(curl -ks --max-time 2 -o /dev/null \
+              -w '%{http_code}' "https://127.0.0.1:$PORT/health" || true)"
+
+            [[ "$HEALTH" == "200" ]] && break
+            kill -0 "$PID" 2>/dev/null || break
+            sleep 0.5
+          done
+
+          AUTH="$(curl -ks --max-time 3 -o /dev/null \
+            -w '%{http_code}' "https://127.0.0.1:$PORT/v2/status" || true)"
+
+          echo "Health: HTTP $HEALTH"
+          echo "Authentication: HTTP $AUTH"
+
+          if [[ "$HEALTH" != "200" || "$AUTH" != "401" ]]; then
+            echo "FAIL: Linux runtime smoke test"
+            tail -40 "$TEST/observer.log"
+            exit 1
+          fi
+
+          echo "PASS: Linux runtime smoke test"
+
+  macos-package:
+    name: Build and test macOS ARM64 LGX
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Build, verify, and smoke-test macOS package
+        run: |
+          ./integrations/basecamp/scripts/package-portable-macos.sh \
+            /tmp/logos-observer-macos-ci.lgx
