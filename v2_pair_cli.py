@@ -2,6 +2,7 @@
 
 import argparse
 import ipaddress
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -11,7 +12,15 @@ from v2_pairing import (
     V2_READ_SCOPES,
     V2_SUPPORTED_SCOPES,
 )
-from v2_tls import ensure_tls_identity
+from cryptography.hazmat.primitives import serialization
+
+from v2_tls import (
+    certificate_covers_names,
+    ensure_tls_identity,
+    load_certificate,
+    spki_pin_from_certificate,
+    spki_pin_from_public_key,
+)
 
 
 def certificate_names_for_host(host):
@@ -52,6 +61,7 @@ def create_local_pairing_offer(
     scopes=V2_READ_SCOPES,
     bonjour=None,
     now=None,
+    existing_identity=False,
 ):
     dns_names, ip_addresses = (
         certificate_names_for_host(
@@ -59,12 +69,45 @@ def create_local_pairing_offer(
         )
     )
 
-    identity = ensure_tls_identity(
-        Path(state_dir),
-        common_name="Logos Observer",
-        dns_names=dns_names,
-        ip_addresses=ip_addresses,
-    )
+    if existing_identity:
+        state_path = Path(state_dir)
+        key_path = state_path / "observer-v2-key.pem"
+        cert_path = state_path / "observer-v2-cert.pem"
+
+        if not key_path.is_file() or not cert_path.is_file():
+            raise ValueError("Existing Observer TLS identity is missing")
+
+        cert = load_certificate(cert_path)
+        private_key = serialization.load_pem_private_key(
+            key_path.read_bytes(),
+            password=None,
+        )
+
+        pin = spki_pin_from_certificate(cert)
+
+        if pin != spki_pin_from_public_key(
+            private_key.public_key()
+        ):
+            raise ValueError(
+                "Observer TLS key and certificate do not match"
+            )
+
+        if not certificate_covers_names(
+            cert,
+            dns_names=dns_names,
+            ip_addresses=ip_addresses,
+        ):
+            raise ValueError(
+                "Existing TLS certificate does not cover advertised host"
+            )
+    else:
+        identity = ensure_tls_identity(
+            Path(state_dir),
+            common_name="Logos Observer",
+            dns_names=dns_names,
+            ip_addresses=ip_addresses,
+        )
+        pin = identity["pin"]
 
     store = PairingStore(
         Path(state_dir)
@@ -77,7 +120,7 @@ def create_local_pairing_offer(
 
     offer = store.create_offer(
         host=endpoint,
-        pin=identity["pin"],
+        pin=pin,
         display_name=display_name,
         scopes=scopes,
         bonjour=bonjour,
@@ -87,7 +130,7 @@ def create_local_pairing_offer(
     return {
         **offer,
         "endpoint": endpoint,
-        "pin": identity["pin"],
+        "pin": pin,
     }
 
 
@@ -152,6 +195,18 @@ def main():
         ),
     )
 
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output JSON containing a sensitive pairing URI",
+    )
+
+    parser.add_argument(
+        "--existing-identity",
+        action="store_true",
+        help="Reuse existing TLS identity without modifying it",
+    )
+
     args = parser.parse_args()
 
     scopes = (
@@ -167,7 +222,12 @@ def main():
         display_name=args.name,
         scopes=scopes,
         bonjour=args.bonjour,
+        existing_identity=args.existing_identity,
     )
+
+    if args.json:
+        print(json.dumps(offer))
+        return
 
     print()
     print("Logos Observer v2 pairing offer")

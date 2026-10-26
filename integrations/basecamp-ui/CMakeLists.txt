@@ -19,4 +19,5 @@ logos_module(
         src/ObserverManagerPlugin.cpp
         src/ObserverManagerBackend.h
         src/ObserverManagerBackend.cpp
+        src/third_party/qrcodegen.cpp
 )

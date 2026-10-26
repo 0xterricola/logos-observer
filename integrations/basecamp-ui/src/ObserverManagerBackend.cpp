@@ -1,11 +1,58 @@
 #include "ObserverManagerBackend.h"
+#include "third_party/qrcodegen.hpp"
+
+#include <QByteArray>
+#include <QStringList>
+#include <exception>
 
 #include <logos_sdk.h>
 
 #include <QJsonDocument>
+#include <QDateTime>
 #include <QJsonObject>
 #include <QMetaObject>
 #include <QPointer>
+
+
+namespace {
+
+QString makePairingQrMatrix(const QString& uri)
+{
+    if (uri.isEmpty())
+        return {};
+
+    try {
+        const QByteArray utf8 = uri.toUtf8();
+
+        const auto qr = qrcodegen::QrCode::encodeText(
+            utf8.constData(),
+            qrcodegen::QrCode::Ecc::MEDIUM
+        );
+
+        QStringList rows;
+
+        for (int y = 0; y < qr.getSize(); ++y) {
+            QString row;
+            row.reserve(qr.getSize());
+
+            for (int x = 0; x < qr.getSize(); ++x) {
+                row.append(
+                    qr.getModule(x, y)
+                        ? QLatin1Char('1')
+                        : QLatin1Char('0')
+                );
+            }
+
+            rows.append(row);
+        }
+
+        return rows.join(QLatin1Char('\n'));
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
+}
 
 ObserverManagerBackend::ObserverManagerBackend(
     LogosAPI* api,
@@ -20,6 +67,25 @@ ObserverManagerBackend::ObserverManagerBackend(
     setServiceDetails(QStringLiteral(
         "Managed Observer status has not been checked."));
 
+    setPairingBusy(false);
+    setPairingStatus(QStringLiteral("Not paired"));
+    setPairingUri(QString());
+    setPairingQrMatrix(QString());
+    setPairingExpiresAt(0);
+
+    m_pairingExpiryTimer.setSingleShot(true);
+
+    connect(
+        &m_pairingExpiryTimer,
+        &QTimer::timeout,
+        this,
+        [this]() {
+            setPairingUri(QString());
+            setPairingQrMatrix(QString());
+            setPairingExpiresAt(0);
+            setPairingStatus(QStringLiteral("Offer expired"));
+        });
+
     setHealthBusy(false);
     setChatBusy(false);
     setChatBridgeStatus(QStringLiteral("Not checked"));
@@ -29,6 +95,11 @@ ObserverManagerBackend::ObserverManagerBackend(
     setHealthStatus(QStringLiteral("Not checked"));
     setHealthDetails(QStringLiteral(
         "Configure the Observer connection and check its health."));
+
+    setDeviceBusy(false);
+    setDeviceStatus(QStringLiteral("Not checked"));
+    setDeviceDetails(QStringLiteral(
+        "Device authorization has not been checked."));
 }
 
 ObserverManagerBackend::~ObserverManagerBackend()
@@ -48,21 +119,33 @@ void ObserverManagerBackend::checkHealth(
     caCert = caCert.trimmed();
     spkiPin = spkiPin.trimmed();
 
-    if (endpoint.isEmpty() ||
-        caCert.isEmpty() ||
-        spkiPin.isEmpty()) {
+    // Empty fields select managed Observer discovery.
+    // Explicit connection details retain strict manual verification.
+    const bool managedCheck =
+        endpoint.isEmpty() &&
+        caCert.isEmpty() &&
+        spkiPin.isEmpty();
+
+    if (!managedCheck &&
+        (endpoint.isEmpty() ||
+         caCert.isEmpty() ||
+         spkiPin.isEmpty())) {
         setHealthStatus(QStringLiteral("Configuration required"));
         setHealthDetails(QStringLiteral(
-            "Provide the HTTPS endpoint, trusted certificate, "
-            "and Observer SPKI pin."));
+            "Provide all three connection fields, or clear "
+            "all three to verify the managed Observer."));
         return;
     }
 
-    QJsonObject config{
-        {"url", endpoint},
-        {"ca_cert", caCert},
-        {"spki_pin", spkiPin}
-    };
+    QJsonObject config;
+
+    if (managedCheck) {
+        config.insert(QStringLiteral("managed"), true);
+    } else {
+        config.insert(QStringLiteral("url"), endpoint);
+        config.insert(QStringLiteral("ca_cert"), caCert);
+        config.insert(QStringLiteral("spki_pin"), spkiPin);
+    }
 
     const QString configJson = QString::fromUtf8(
         QJsonDocument(config).toJson(QJsonDocument::Compact));
@@ -133,6 +216,113 @@ void ObserverManagerBackend::checkHealth(
         });
 }
 
+
+
+void ObserverManagerBackend::checkDeviceSummary()
+{
+    if (deviceBusy())
+        return;
+
+    setDeviceBusy(true);
+    setDeviceStatus(QStringLiteral("Checking..."));
+    setDeviceDetails(QStringLiteral(
+        "Checking local device authorization."));
+
+    QPointer<ObserverManagerBackend> guard(this);
+
+    m_modules->logos_observer.getDeviceSummaryAsyncResult(
+        [guard](logos::AsyncResult<QString> outcome) {
+            const bool succeeded = outcome.ok();
+            const QString payload = outcome.value;
+
+            if (!guard)
+                return;
+
+            QMetaObject::invokeMethod(
+                guard.data(),
+                [guard, succeeded, payload]() {
+                    if (!guard)
+                        return;
+
+                    guard->setDeviceBusy(false);
+
+                    if (!succeeded) {
+                        guard->setDeviceStatus(
+                            QStringLiteral("Error"));
+                        guard->setDeviceDetails(
+                            QStringLiteral(
+                                "Could not retrieve device authorization."));
+                        return;
+                    }
+
+                    QJsonParseError error;
+                    const QJsonDocument document =
+                        QJsonDocument::fromJson(
+                            payload.toUtf8(), &error);
+
+                    if (error.error != QJsonParseError::NoError ||
+                        !document.isObject()) {
+                        guard->setDeviceStatus(
+                            QStringLiteral("Error"));
+                        guard->setDeviceDetails(
+                            QStringLiteral(
+                                "Invalid device authorization response."));
+                        return;
+                    }
+
+                    const QJsonObject response = document.object();
+
+                    if (!response.value("ok").toBool()) {
+                        guard->setDeviceStatus(
+                            QStringLiteral("Error"));
+                        guard->setDeviceDetails(
+                            QStringLiteral(
+                                "Authorization records could not be verified."));
+                        return;
+                    }
+
+                    const int authorized =
+                        response.value("authorized_devices").toInt(-1);
+
+                    const int chatRead =
+                        response.value("chat_read_devices").toInt(-1);
+
+                    const QString status =
+                        response.value("status").toString();
+
+                    if (authorized < 0 || chatRead < 0 ||
+                        chatRead > authorized ||
+                        (status != QStringLiteral("ready") &&
+                         status != QStringLiteral("unpaired")) ||
+                        (status == QStringLiteral("ready")) !=
+                            (chatRead > 0)) {
+                        guard->setDeviceStatus(
+                            QStringLiteral("Error"));
+                        guard->setDeviceDetails(
+                            QStringLiteral(
+                                "Invalid device authorization counts."));
+                        return;
+                    }
+
+                    if (chatRead > 0) {
+                        guard->setDeviceStatus(
+                            QStringLiteral("Ready"));
+                        guard->setDeviceDetails(
+                            QStringLiteral(
+                                "%1 device(s) authorized for chat.read")
+                                .arg(chatRead));
+                    } else {
+                        guard->setDeviceStatus(
+                            QStringLiteral("Unpaired"));
+                        guard->setDeviceDetails(
+                            QStringLiteral(
+                                "No device authorized for Chat. "
+                                "Use Pair Device to connect one."));
+                    }
+                },
+                Qt::QueuedConnection);
+        });
+}
 
 void ObserverManagerBackend::checkChatHealth()
 {
@@ -377,6 +567,117 @@ void ObserverManagerBackend::stopService()
                     if (guard)
                         guard->applyServiceResult(
                             succeeded, payload);
+                },
+                Qt::QueuedConnection);
+        });
+}
+
+
+void ObserverManagerBackend::createPairingOffer()
+{
+    if (pairingBusy() || serviceBusy() ||
+        serviceStatus() != QStringLiteral("running"))
+        return;
+
+    m_pairingExpiryTimer.stop();
+    setPairingUri(QString());
+    setPairingQrMatrix(QString());
+    setPairingExpiresAt(0);
+    setPairingBusy(true);
+    setPairingStatus(QStringLiteral("Creating offer..."));
+
+    QPointer<ObserverManagerBackend> guard(this);
+
+    m_modules->logos_observer.createPairingOfferAsyncResult(
+        [guard](logos::AsyncResult<QString> outcome) {
+            const bool succeeded = outcome.ok();
+            const QString payload = outcome.value;
+
+            if (!guard)
+                return;
+
+            QMetaObject::invokeMethod(
+                guard.data(),
+                [guard, succeeded, payload]() {
+                    if (!guard)
+                        return;
+
+                    guard->setPairingBusy(false);
+
+                    if (!succeeded) {
+                        guard->setPairingStatus(
+                            QStringLiteral("Module call failed"));
+                        return;
+                    }
+
+                    QJsonParseError parseError;
+                    const QJsonDocument document =
+                        QJsonDocument::fromJson(
+                            payload.toUtf8(), &parseError);
+
+                    if (parseError.error !=
+                            QJsonParseError::NoError ||
+                        !document.isObject()) {
+                        guard->setPairingStatus(
+                            QStringLiteral("Invalid response"));
+                        return;
+                    }
+
+                    const QJsonObject root = document.object();
+
+                    if (!root.value("ok").toBool()) {
+                        const QString error =
+                            root.value("error").toString();
+
+                        guard->setPairingStatus(
+                            error == QStringLiteral("forbidden")
+                                ? QStringLiteral("Authorization denied")
+                                : QStringLiteral("Pairing unavailable"));
+                        return;
+                    }
+
+                    const QJsonObject offer =
+                        root.value("offer").toObject();
+
+                    const QString uri =
+                        offer.value("qr").toString();
+
+                    const QString endpoint =
+                        offer.value("endpoint").toString();
+
+                    const qint64 expiresAt = static_cast<qint64>(
+                        offer.value("expires_at").toDouble());
+
+                    const qint64 secondsRemaining =
+                        expiresAt - QDateTime::currentSecsSinceEpoch();
+
+                    if (uri.isEmpty() ||
+                        endpoint.isEmpty() ||
+                        secondsRemaining <= 0 ||
+                        secondsRemaining > 300) {
+                        guard->setPairingStatus(
+                            QStringLiteral("Invalid or expired offer"));
+                        return;
+                    }
+
+                    // The URI contains a temporary pairing secret.
+                    // Never print it to logs or diagnostic messages.
+                    const QString matrix = makePairingQrMatrix(uri);
+
+                    if (matrix.isEmpty()) {
+                        guard->setPairingStatus(
+                            QStringLiteral("QR encoding failed"));
+                        return;
+                    }
+
+                    guard->setPairingQrMatrix(matrix);
+                    guard->setPairingExpiresAt(expiresAt);
+                    guard->setPairingUri(uri);
+                    guard->setPairingStatus(
+                        QStringLiteral("Offer ready (%1)").arg(endpoint));
+
+                    guard->m_pairingExpiryTimer.start(
+                        static_cast<int>(secondsRemaining * 1000));
                 },
                 Qt::QueuedConnection);
         });

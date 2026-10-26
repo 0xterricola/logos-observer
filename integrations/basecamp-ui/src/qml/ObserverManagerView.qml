@@ -12,6 +12,21 @@ Rectangle {
     readonly property var backend:
         logos ? logos.module("logos_observer_ui") : null
 
+
+    property int currentEpoch: Math.floor(Date.now() / 1000)
+
+    Timer {
+        interval: 1000
+        repeat: true
+
+        running: !!root.backend
+            && root.backend.pairingExpiresAt > 0
+
+        onTriggered: {
+            root.currentEpoch = Math.floor(Date.now() / 1000)
+        }
+    }
+
     ScrollView {
         id: pageScroll
         anchors.fill: parent
@@ -34,6 +49,215 @@ Rectangle {
             color: "#9ca3af"
             font.pixelSize: 14
         }
+
+
+            GroupBox {
+                id: setupReadinessPanel
+                title: "Setup Readiness"
+                Layout.fillWidth: true
+
+                property string lastHttpsCheckedInputs: ""
+
+                readonly property string currentHttpsInputs:
+                    endpointField.text.trim() + "\\u001f"
+                    + certField.text.trim() + "\\u001f"
+                    + pinField.text.trim()
+
+                readonly property var checks: {
+                    const b = root.backend;
+                    if (!b) return [];
+
+                    const service = b.serviceStatus;
+                    const bridge = b.chatBridgeStatus;
+                    const chat = b.chatStatus;
+                    const conv = b.conversationsStatus;
+                    const https = b.healthStatus;
+                    const httpsCurrent =
+                        setupReadinessPanel.lastHttpsCheckedInputs
+                        === setupReadinessPanel.currentHttpsInputs;
+
+                    return [
+                        {
+                            name: "Observer Service",
+                            state: service === "running" ? "ready"
+                                : (service === "stopped" || service === "error")
+                                  ? "failed" : "unknown",
+                            detail: service === "running"
+                                ? "Managed process is running"
+                                : "Start Observer using the control below"
+                        },
+                        {
+                            name: "LAN & HTTPS",
+                            state: !httpsCurrent || b.healthBusy
+                                ? "unknown"
+                                : https === "Healthy"
+                                  ? "ready"
+                                  : (https === "Unavailable or unhealthy"
+                                     || https === "Module call failed"
+                                     || https === "Invalid response")
+                                    ? "failed" : "unknown",
+                            detail: !httpsCurrent
+                                ? "Run setup checks to verify HTTPS"
+                                : https === "Healthy"
+                                  ? "HTTPS and Observer identity verified"
+                                  : https === "Configuration required"
+                                    ? "Enter endpoint, certificate path, "
+                                      + "and SPKI pin below"
+                                    : https === "Checking..."
+                                      ? "Checking HTTPS connection..."
+                                      : "Review Observer Connection "
+                                        + "settings and retry"
+                        },
+                        {
+                            name: "Authorized Devices",
+                            state: b.deviceBusy
+                                ? "unknown"
+                                : b.deviceStatus === "Ready"
+                                  ? "ready"
+                                  : b.deviceStatus === "Error"
+                                    ? "failed" : "unknown",
+                            detail: b.deviceStatus === "Ready"
+                                ? b.deviceDetails
+                                : b.deviceStatus === "Unpaired"
+                                  ? "Pair a device using the QR code below"
+                                  : b.deviceStatus === "Error"
+                                    ? b.deviceDetails
+                                    : "Run setup checks to verify authorization"
+                        },
+                        {
+                            name: "JSON-RPC Bridge",
+                            state: bridge === "Responding" ? "ready"
+                                : (bridge === "Unavailable"
+                                   || bridge === "Timed out")
+                                  ? "failed" : "unknown",
+                            detail: bridge === "Responding"
+                                ? "Local bridge is responding"
+                                : "Load JSON-RPC Bridge in Module Inspector"
+                        },
+                        {
+                            name: "Basecamp Chat",
+                            state: chat === "Available" ? "ready"
+                                : chat === "Unavailable"
+                                  ? "failed" : "unknown",
+                            detail: chat === "Available"
+                                ? "Chat has initialized successfully"
+                                : "Open Basecamp Chat once"
+                        },
+                        {
+                            name: "Conversations",
+                            state: conv.indexOf("Readable") === 0
+                                ? "ready"
+                                : (conv === "Unavailable"
+                                   || conv === "Timed out")
+                                  ? "failed" : "unknown",
+                            detail: conv.indexOf("Readable") === 0
+                                ? conv
+                                : "Run Check Chat after initializing Chat"
+                        }
+                    ];
+                }
+
+                readonly property int readyCount:
+                    checks.filter(function(item) {
+                        return item.state === "ready";
+                    }).length
+
+                label: Label {
+                    text: "Setup Readiness"
+                    color: "#e2e8f0"
+                    font.pixelSize: 15
+                    font.bold: true
+                }
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 14
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: setupReadinessPanel.readyCount
+                              + " of 6 checks passing"
+                        font.pixelSize: 17
+                        font.bold: true
+                        color: setupReadinessPanel.readyCount === 6
+                            ? "#4ade80" : "#e2e8f0"
+                    }
+
+                    Repeater {
+                        model: setupReadinessPanel.checks
+
+                        delegate: RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 12
+
+                            readonly property var check: modelData
+
+                            Rectangle {
+                                Layout.preferredWidth: 14
+                                Layout.preferredHeight: 14
+                                radius: 7
+                                color: check.state === "ready"
+                                    ? "#22c55e"
+                                    : check.state === "failed"
+                                      ? "#ef4444" : "#64748b"
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 3
+
+                                Label {
+                                    text: check.name
+                                    color: "#e2e8f0"
+                                    font.bold: true
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: check.detail
+                                    color: "#94a3b8"
+                                    wrapMode: Text.Wrap
+                                }
+                            }
+                        }
+                    }
+
+                    Button {
+                        text: "Run Setup Checks"
+                        enabled: !!root.backend
+                            && root.backend.ready
+                            && !root.backend.serviceBusy
+                            && !root.backend.chatBusy
+                            && !root.backend.healthBusy
+                            && !root.backend.deviceBusy
+
+                        onClicked: {
+                            setupReadinessPanel.lastHttpsCheckedInputs =
+                                setupReadinessPanel.currentHttpsInputs;
+
+                            root.backend.refreshServiceStatus();
+                            root.backend.checkChatHealth();
+                            root.backend.checkDeviceSummary();
+                            root.backend.checkHealth(
+                                endpointField.text,
+                                certField.text,
+                                pinField.text
+                            );
+                        }
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: setupReadinessPanel.readyCount === 6
+                            ? "Local Observer, Chat, and HTTPS checks passed. "
+                              + "Verify device access separately."
+                            : "Follow the instructions beside each "
+                              + "incomplete check, then run checks again."
+                        color: "#94a3b8"
+                        wrapMode: Text.Wrap
+                    }
+                }
+            }
 
         GroupBox {
             title: "Managed Observer"
@@ -106,11 +330,144 @@ Rectangle {
                     }
                 }
 
+
+            }
+        }
+
+        GroupBox {
+            title: "Pair Device"
+            Layout.fillWidth: true
+
+            label: Label {
+                text: "Pair Device"
+                color: "#e2e8f0"
+                font.pixelSize: 15
+                font.bold: true
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 12
+
                 Label {
                     Layout.fillWidth: true
-                    text: "Development runtime configuration required. "
-                        + "Portable Python runtime is not bundled yet."
-                    color: "#64748b"
+                    text: "Generate a five-minute pairing offer for read-only Chat access."
+                    color: "#cbd5e1"
+                    wrapMode: Text.Wrap
+                }
+
+                Label {
+                    text: "Permission: chat.read"
+                    color: "#94a3b8"
+                }
+
+                Button {
+                    text: root.backend && root.backend.pairingBusy
+                        ? "Creating..."
+                        : "Pair Device"
+
+                    enabled: !!root.backend
+                        && root.backend.ready
+                        && !root.backend.serviceBusy
+                        && !root.backend.pairingBusy
+                        && root.backend.serviceStatus === "running"
+
+                    onClicked: root.backend.createPairingOffer()
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Status: " + (root.backend
+                        ? root.backend.pairingStatus
+                        : "Backend unavailable")
+                    color: "#e2e8f0"
+                    wrapMode: Text.Wrap
+                }
+
+                Canvas {
+                    id: pairingCanvas
+
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: 320
+                    Layout.preferredHeight: 320
+
+                    property string matrix: root.backend
+                        ? root.backend.pairingQrMatrix
+                        : ""
+
+                    visible: matrix.length > 0
+                        && root.backend.pairingExpiresAt > root.currentEpoch
+
+                    onMatrixChanged: requestPaint()
+
+                    onPaint: {
+                        const ctx = getContext("2d");
+
+                        ctx.fillStyle = "white";
+                        ctx.fillRect(0, 0, width, height);
+
+                        if (!matrix.length)
+                            return;
+
+                        const rows = matrix.split("\n");
+                        const size = rows.length;
+                        const quiet = 4;
+
+                        const cell = Math.floor(
+                            Math.min(width, height)
+                            / (size + quiet * 2)
+                        );
+
+                        if (cell < 1)
+                            return;
+
+                        const offsetX = Math.floor(
+                            (width - cell * (size + quiet * 2)) / 2
+                        );
+
+                        const offsetY = Math.floor(
+                            (height - cell * (size + quiet * 2)) / 2
+                        );
+
+                        ctx.fillStyle = "black";
+
+                        for (let y = 0; y < size; ++y) {
+                            for (let x = 0; x < size; ++x) {
+                                if (rows[y][x] === "1") {
+                                    ctx.fillRect(
+                                        offsetX + (x + quiet) * cell,
+                                        offsetY + (y + quiet) * cell,
+                                        cell,
+                                        cell
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Label {
+                    Layout.alignment: Qt.AlignHCenter
+
+                    visible: !!root.backend
+                        && root.backend.pairingExpiresAt > 0
+
+                    text: "Expires in "
+                        + Math.max(
+                            0,
+                            root.backend.pairingExpiresAt
+                                - root.currentEpoch
+                        )
+                        + " seconds"
+
+                    color: "#94a3b8"
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Scan only with a trusted Observer client. "
+                        + "The QR contains a temporary pairing secret."
+                    color: "#94a3b8"
                     font.pixelSize: 12
                     wrapMode: Text.Wrap
                 }

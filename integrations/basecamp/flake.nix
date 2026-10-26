@@ -48,6 +48,7 @@
             --onedir \
             --name logos-observer \
             --paths "$PWD" \
+            --hidden-import=v2_pair_cli \
             --distpath "$out" \
             --workpath "$TMPDIR/pyinstaller-work" \
             --specpath "$TMPDIR" \

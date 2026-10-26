@@ -1,4 +1,5 @@
 #include "managed_observer_service.h"
+#include "observer_network_config.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -128,6 +129,17 @@ ManagedObserverResult ManagedObserverService::start(
         return {false, "error", "Unable to open Observer log", 0};
     }
 
+    const auto network = observer_network::current();
+
+    if (!network.valid) {
+        return {
+            false,
+            "not_configured",
+            "LOGOS_OBSERVER_LAN_IP must be a private IPv4 address",
+            0
+        };
+    }
+
     std::vector<std::string> arguments = {
         executable.string()
     };
@@ -137,7 +149,8 @@ ManagedObserverResult ManagedObserverService::start(
     }
 
     arguments.insert(arguments.end(), {
-        "--host", "127.0.0.1",
+        "--host", network.host,
+        "--advertise-host", network.host,
         "--port", "18446",
         "--state-dir", stateDir.string(),
         "--chat-bridge", "http://127.0.0.1:8645/rpc"
