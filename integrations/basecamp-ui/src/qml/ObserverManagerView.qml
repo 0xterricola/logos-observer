@@ -13,6 +13,8 @@ Rectangle {
         logos ? logos.module("logos_observer_ui") : null
 
 
+    property bool advancedSettingsExpanded: false
+
     property int currentEpoch: Math.floor(Date.now() / 1000)
 
     Timer {
@@ -56,6 +58,7 @@ Rectangle {
                 title: "Setup Readiness"
                 Layout.fillWidth: true
 
+                property bool showChecks: false
                 property string lastHttpsCheckedInputs: ""
 
                 readonly property string currentHttpsInputs:
@@ -186,7 +189,9 @@ Rectangle {
 
                     Label {
                         Layout.fillWidth: true
-                        text: setupReadinessPanel.readyCount
+                        text: setupReadinessPanel.readyCount === 6
+                            ? "All systems ready - 6/6"
+                            : setupReadinessPanel.readyCount
                               + " of 6 checks passing"
                         font.pixelSize: 17
                         font.bold: true
@@ -194,10 +199,20 @@ Rectangle {
                             ? "#4ade80" : "#e2e8f0"
                     }
 
+                    Button {
+                        text: setupReadinessPanel.showChecks
+                            ? "Hide system checks"
+                            : "View system checks"
+                        visible: setupReadinessPanel.readyCount === 6
+                        onClicked: setupReadinessPanel.showChecks =
+                            !setupReadinessPanel.showChecks
+                    }
+
                     Repeater {
                         model: setupReadinessPanel.checks
 
                         delegate: RowLayout {
+                            visible: setupReadinessPanel.showChecks || setupReadinessPanel.readyCount !== 6
                             Layout.fillWidth: true
                             spacing: 12
 
@@ -363,86 +378,11 @@ Rectangle {
             }
 
         GroupBox {
-            title: "Managed Observer"
+            title: "Your Devices"
             Layout.fillWidth: true
 
             label: Label {
-                text: "Managed Observer"
-                color: "#e2e8f0"
-                font.pixelSize: 15
-                font.bold: true
-            }
-
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 12
-
-                Label {
-                    text: "Service: " + (root.backend
-                        ? root.backend.serviceStatus
-                        : "Backend unavailable")
-                    color: "#e2e8f0"
-                    font.pixelSize: 16
-                    font.bold: true
-                }
-
-                Label {
-                    Layout.fillWidth: true
-                    text: root.backend
-                        ? root.backend.serviceDetails
-                        : ""
-                    color: "#94a3b8"
-                    wrapMode: Text.Wrap
-                }
-
-                RowLayout {
-                    spacing: 12
-
-                    Button {
-                        text: "Start Observer"
-                        enabled: !!root.backend
-                            && root.backend.ready
-                            && !root.backend.serviceBusy
-                            && root.backend.serviceStatus !== "running"
-                            && root.backend.serviceStatus !== "starting"
-
-                        onClicked: root.backend.startService()
-                    }
-
-                    Button {
-                        text: "Stop Observer"
-                        enabled: !!root.backend
-                            && root.backend.ready
-                            && !root.backend.serviceBusy
-                            && (root.backend.serviceStatus === "running"
-                                || root.backend.serviceStatus === "starting")
-
-                        onClicked: root.backend.stopService()
-                    }
-
-                    Button {
-                        text: root.backend && root.backend.serviceBusy
-                            ? "Working..."
-                            : "Refresh Status"
-
-                        enabled: !!root.backend
-                            && root.backend.ready
-                            && !root.backend.serviceBusy
-
-                        onClicked: root.backend.refreshServiceStatus()
-                    }
-                }
-
-
-            }
-        }
-
-        GroupBox {
-            title: "Pair Device"
-            Layout.fillWidth: true
-
-            label: Label {
-                text: "Pair Device"
+                text: "Your Devices"
                 color: "#e2e8f0"
                 font.pixelSize: 15
                 font.bold: true
@@ -467,7 +407,7 @@ Rectangle {
                 Button {
                     text: root.backend && root.backend.pairingBusy
                         ? "Creating..."
-                        : "Pair Device"
+                        : "Pair New Device"
 
                     enabled: !!root.backend
                         && root.backend.ready
@@ -480,10 +420,30 @@ Rectangle {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "Status: " + (root.backend
-                        ? root.backend.pairingStatus
-                        : "Backend unavailable")
+                    text: root.backend
+                        ? root.backend.deviceStatus === "Ready"
+                          ? root.backend.deviceDetails
+                          : root.backend.deviceStatus === "Unpaired"
+                            ? "No devices authorized yet"
+                            : root.backend.deviceStatus === "Error"
+                              ? root.backend.deviceDetails
+                              : "Device authorization not checked"
+                        : "Backend unavailable"
                     color: "#e2e8f0"
+                    wrapMode: Text.Wrap
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    visible: !!root.backend
+                        && root.backend.pairingStatus !== "Not paired"
+                        && root.backend.pairingStatus !== "Not checked"
+
+                    text: root.backend
+                        ? "Pairing: " + root.backend.pairingStatus
+                        : ""
+
+                    color: "#94a3b8"
                     wrapMode: Text.Wrap
                 }
 
@@ -577,8 +537,96 @@ Rectangle {
             }
         }
 
+        Button {
+            Layout.alignment: Qt.AlignLeft
+            flat: false
+            font.bold: true
+            text: root.advancedSettingsExpanded
+                ? "Hide advanced settings"
+                : "Advanced settings and diagnostics"
+            onClicked: root.advancedSettingsExpanded =
+                !root.advancedSettingsExpanded
+        }
+
+        GroupBox {
+            title: "Managed Observer"
+            visible: root.advancedSettingsExpanded
+            Layout.fillWidth: true
+
+            label: Label {
+                text: "Managed Observer"
+                color: "#e2e8f0"
+                font.pixelSize: 15
+                font.bold: true
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 12
+
+                Label {
+                    text: "Service: " + (root.backend
+                        ? root.backend.serviceStatus
+                        : "Backend unavailable")
+                    color: "#e2e8f0"
+                    font.pixelSize: 16
+                    font.bold: true
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.backend
+                        ? root.backend.serviceDetails
+                        : ""
+                    color: "#94a3b8"
+                    wrapMode: Text.Wrap
+                }
+
+                RowLayout {
+                    spacing: 12
+
+                    Button {
+                        text: "Start Observer"
+                        enabled: !!root.backend
+                            && root.backend.ready
+                            && !root.backend.serviceBusy
+                            && root.backend.serviceStatus !== "running"
+                            && root.backend.serviceStatus !== "starting"
+
+                        onClicked: root.backend.startService()
+                    }
+
+                    Button {
+                        text: "Stop Observer"
+                        enabled: !!root.backend
+                            && root.backend.ready
+                            && !root.backend.serviceBusy
+                            && (root.backend.serviceStatus === "running"
+                                || root.backend.serviceStatus === "starting")
+
+                        onClicked: root.backend.stopService()
+                    }
+
+                    Button {
+                        text: root.backend && root.backend.serviceBusy
+                            ? "Working..."
+                            : "Refresh Status"
+
+                        enabled: !!root.backend
+                            && root.backend.ready
+                            && !root.backend.serviceBusy
+
+                        onClicked: root.backend.refreshServiceStatus()
+                    }
+                }
+
+
+            }
+        }
+
         GroupBox {
             title: "Observer Connection"
+            visible: root.advancedSettingsExpanded
             label: Label {
                 text: "Observer Connection"
                 color: "#e2e8f0"
@@ -698,6 +746,7 @@ Rectangle {
 
         GroupBox {
             title: "Service Health"
+            visible: root.advancedSettingsExpanded
             label: Label {
                 text: "Service Health"
                 color: "#e2e8f0"
