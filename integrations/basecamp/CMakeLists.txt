@@ -24,10 +24,12 @@ logos_module(
 
 
 find_package(CURL REQUIRED)
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(nlohmann_json CONFIG REQUIRED)
 
 target_link_libraries(logos_observer_module_plugin
     PRIVATE
         CURL::libcurl
+        OpenSSL::Crypto
         nlohmann_json::nlohmann_json
 )

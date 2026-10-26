@@ -1,4 +1,14 @@
 #include "observer_health.h"
+#include "observer_network_config.h"
+
+#include <openssl/pem.h>
+#include <openssl/sha.h>
+#include <openssl/evp.h>
+#include <openssl/x509.h>
+
+#include <filesystem>
+#include <vector>
+#include <cstdlib>
 
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
@@ -10,6 +20,68 @@
 using json = nlohmann::json;
 
 namespace {
+
+std::string observerPinFromCertificate(const std::string& path)
+{
+    BIO* bio = BIO_new_file(path.c_str(), "rb");
+    if (!bio)
+        return {};
+
+    X509* cert = PEM_read_bio_X509(bio, nullptr, nullptr, nullptr);
+    BIO_free(bio);
+
+    if (!cert)
+        return {};
+
+    EVP_PKEY* key = X509_get_pubkey(cert);
+    X509_free(cert);
+
+    if (!key)
+        return {};
+
+    const int length = i2d_PUBKEY(key, nullptr);
+    if (length <= 0) {
+        EVP_PKEY_free(key);
+        return {};
+    }
+
+    std::vector<unsigned char> der(
+        static_cast<size_t>(length));
+
+    unsigned char* cursor = der.data();
+    const int written = i2d_PUBKEY(key, &cursor);
+    EVP_PKEY_free(key);
+
+    if (written != length)
+        return {};
+
+    unsigned char digest[SHA256_DIGEST_LENGTH];
+
+    if (!SHA256(der.data(), der.size(), digest))
+        return {};
+
+    unsigned char encoded[
+        4 * ((SHA256_DIGEST_LENGTH + 2) / 3) + 1
+    ] = {};
+
+    if (EVP_EncodeBlock(
+            encoded, digest, SHA256_DIGEST_LENGTH) <= 0)
+        return {};
+
+    std::string value(
+        reinterpret_cast<const char*>(encoded));
+
+    for (char& character : value) {
+        if (character == '+') character = '-';
+        else if (character == '/') character = '_';
+    }
+
+    while (!value.empty() && value.back() == '=')
+        value.pop_back();
+
+    return "sha256/" + value;
+}
+
 
 constexpr size_t MAX_RESPONSE_BYTES = 4096;
 
@@ -115,11 +187,43 @@ std::string probeObserverHealth(const std::string& configJson) {
     std::string pin;
 
     try {
-        url = config.at("url").get<std::string>();
-        caCert = config.at("ca_cert").get<std::string>();
-        pin = curlPin(
-            config.at("spki_pin").get<std::string>()
-        );
+        if (config.contains("managed")) {
+            if (config.size() != 1 ||
+                config.at("managed") != true) {
+                return failure("invalid_config");
+            }
+
+            const auto network = observer_network::current();
+
+            if (!network.valid)
+                return failure("invalid_managed_network");
+
+            const char* home = std::getenv("HOME");
+
+            if (!home || !*home)
+                return failure("missing_home");
+
+            const auto certPath =
+                std::filesystem::path(home) /
+                ".local/state/logos-observer/basecamp/"
+                "observer-v2-cert.pem";
+
+            const std::string observerPin =
+                observerPinFromCertificate(certPath.string());
+
+            if (observerPin.empty())
+                return failure("managed_certificate_unavailable");
+
+            url = "https://" + network.host + ":18446/health";
+            caCert = certPath.string();
+            pin = curlPin(observerPin);
+        } else {
+            url = config.at("url").get<std::string>();
+            caCert = config.at("ca_cert").get<std::string>();
+            pin = curlPin(
+                config.at("spki_pin").get<std::string>()
+            );
+        }
     } catch (...) {
         return failure("missing_or_invalid_configuration");
     }

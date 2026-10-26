@@ -22,6 +22,8 @@ public:
     std::string startService();
     std::string getServiceStatus();
     std::string stopService();
+    std::string createPairingOffer();
+    std::string getDeviceSummary();
 
     // Read-only local Basecamp Chat diagnostics.
 

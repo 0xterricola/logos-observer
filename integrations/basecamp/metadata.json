@@ -15,7 +15,8 @@
       "build": [],
       "runtime": [
         "curl",
-        "nlohmann_json"
+        "nlohmann_json",
+        "openssl"
       ]
     },
     "external_libraries": [],

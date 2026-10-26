@@ -5,14 +5,25 @@ class ObserverManagerBackend
     PROP(QString serviceStatus READONLY)
     PROP(QString serviceDetails READONLY)
 
+    PROP(bool pairingBusy READONLY)
+    PROP(QString pairingStatus READONLY)
+    PROP(QString pairingUri READONLY)
+    PROP(QString pairingQrMatrix READONLY)
+    PROP(qint64 pairingExpiresAt READONLY)
+
     PROP(bool healthBusy READONLY)
     PROP(QString healthStatus READONLY)
     PROP(QString healthDetails READONLY)
+
     PROP(bool chatBusy READONLY)
     PROP(QString chatBridgeStatus READONLY)
     PROP(QString chatStatus READONLY)
     PROP(QString conversationsStatus READONLY)
     PROP(QString chatDetails READONLY)
+
+    PROP(bool deviceBusy READONLY)
+    PROP(QString deviceStatus READONLY)
+    PROP(QString deviceDetails READONLY)
 
     SLOT(void checkHealth(
         QString endpoint,
@@ -22,6 +33,8 @@ class ObserverManagerBackend
     SLOT(void refreshServiceStatus())
     SLOT(void startService())
     SLOT(void stopService())
+    SLOT(void createPairingOffer())
 
     SLOT(void checkChatHealth())
+    SLOT(void checkDeviceSummary())
 }

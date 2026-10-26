@@ -284,6 +284,57 @@ class PairingStore:
                 list(requested_scopes),
         }
 
+    def authorization_summary(self):
+        """Return aggregate authorization status, never credentials."""
+        with self._locked():
+            state = self._read()
+
+            if not isinstance(state, dict):
+                raise ValueError("invalid authorization state")
+
+            devices = state.get("devices")
+
+            if not isinstance(devices, dict):
+                raise ValueError("invalid device records")
+
+            authorized = 0
+            chat_read = 0
+
+            for device in devices.values():
+                if not isinstance(device, dict):
+                    raise ValueError("invalid device record")
+
+                revoked = device.get("revoked", False)
+
+                if not isinstance(revoked, bool):
+                    raise ValueError("invalid revocation status")
+
+                if revoked:
+                    continue
+
+                credential = device.get("hmac_key")
+                scopes = device.get("scopes")
+
+                if not isinstance(credential, str) or not credential:
+                    raise ValueError("invalid device credential")
+
+                if not isinstance(scopes, list) or not all(
+                    isinstance(scope, str) for scope in scopes
+                ):
+                    raise ValueError("invalid device scopes")
+
+                authorized += 1
+
+                if "chat.read" in scopes:
+                    chat_read += 1
+
+            return {
+                "ok": True,
+                "status": "ready" if chat_read else "unpaired",
+                "authorized_devices": authorized,
+                "chat_read_devices": chat_read,
+            }
+
     def get_device(
         self,
         device_id,

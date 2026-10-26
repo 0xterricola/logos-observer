@@ -150,7 +150,7 @@ def main():
 
     parser.add_argument(
         "--host",
-        required=True,
+        required=False,
         help=(
             "address clients use to reach the "
             "Observer"
@@ -207,7 +207,42 @@ def main():
         help="Reuse existing TLS identity without modifying it",
     )
 
+    parser.add_argument(
+        "--device-summary",
+        action="store_true",
+        help="Print aggregate device authorization status only",
+    )
+
     args = parser.parse_args()
+
+    if args.device_summary:
+        state_file = args.state_dir / "v2-pairing.json"
+
+        if not state_file.exists():
+            result = {
+                "ok": True,
+                "status": "unpaired",
+                "authorized_devices": 0,
+                "chat_read_devices": 0,
+            }
+        else:
+            try:
+                result = PairingStore(
+                    args.state_dir
+                ).authorization_summary()
+            except Exception:
+                print(json.dumps({
+                    "ok": False,
+                    "status": "error",
+                    "error": "authorization_store_unavailable",
+                }))
+                raise SystemExit(1)
+
+        print(json.dumps(result))
+        return
+
+    if not args.host:
+        parser.error("--host is required for pairing offers")
 
     scopes = (
         tuple(args.scopes)

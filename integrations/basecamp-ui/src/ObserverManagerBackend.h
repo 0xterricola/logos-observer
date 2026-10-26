@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QTimer>
 
 #include "rep_ObserverManagerBackend_source.h"
 
@@ -27,10 +28,12 @@ public slots:
         QString spkiPin) override;
 
     void checkChatHealth() override;
+    void checkDeviceSummary() override;
 
     void refreshServiceStatus() override;
     void startService() override;
     void stopService() override;
+    void createPairingOffer() override;
 
 private:
     void applyServiceResult(
@@ -38,4 +41,5 @@ private:
         const QString& payload);
     LogosAPI* m_api;
     LogosModules* m_modules;
+    QTimer m_pairingExpiryTimer;
 };
