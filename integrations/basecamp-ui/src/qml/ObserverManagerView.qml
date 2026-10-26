@@ -71,6 +71,9 @@ Rectangle {
                     const bridge = b.chatBridgeStatus;
                     const chat = b.chatStatus;
                     const conv = b.conversationsStatus;
+                    const bridgeReady = bridge === "Responding";
+                    const chatReady =
+                        bridgeReady && chat === "Available";
                     const https = b.healthStatus;
                     const httpsCurrent =
                         setupReadinessPanel.lastHttpsCheckedInputs
@@ -136,23 +139,31 @@ Rectangle {
                         },
                         {
                             name: "Basecamp Chat",
-                            state: chat === "Available" ? "ready"
+                            state: !bridgeReady ? "unknown"
+                                : chat === "Available" ? "ready"
                                 : chat === "Unavailable"
                                   ? "failed" : "unknown",
-                            detail: chat === "Available"
-                                ? "Chat has initialized successfully"
-                                : "Open Basecamp Chat once"
+                            detail: !bridgeReady
+                                ? "Waiting for JSON-RPC Bridge"
+                                : chat === "Available"
+                                  ? "Chat has initialized successfully"
+                                  : "Open Basecamp Chat once"
                         },
                         {
                             name: "Conversations",
-                            state: conv.indexOf("Readable") === 0
-                                ? "ready"
-                                : (conv === "Unavailable"
-                                   || conv === "Timed out")
-                                  ? "failed" : "unknown",
-                            detail: conv.indexOf("Readable") === 0
-                                ? conv
-                                : "Run Check Chat after initializing Chat"
+                            state: !chatReady ? "unknown"
+                                : conv.indexOf("Readable") === 0
+                                  ? "ready"
+                                  : (conv === "Unavailable"
+                                     || conv === "Timed out")
+                                    ? "failed" : "unknown",
+                            detail: !bridgeReady
+                                ? "Waiting for JSON-RPC Bridge"
+                                : !chatReady
+                                  ? "Waiting for Basecamp Chat"
+                                  : conv.indexOf("Readable") === 0
+                                    ? conv
+                                    : "Recheck Chat conversations"
                         }
                     ];
                 }
@@ -216,6 +227,98 @@ Rectangle {
                                     Layout.fillWidth: true
                                     text: check.detail
                                     color: "#94a3b8"
+                                    wrapMode: Text.Wrap
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+
+                                    visible: check.state !== "ready"
+                                        && (check.name === "JSON-RPC Bridge"
+                                            || (check.name === "Basecamp Chat"
+                                                && root.backend
+                                                && root.backend.chatBridgeStatus
+                                                   === "Responding")
+                                            || check.name === "LAN & HTTPS")
+
+                                    text: check.name === "JSON-RPC Bridge"
+                                        ? "Open Basecamp Module Inspector, "
+                                          + "load json_rpc_bridge, then "
+                                          + "run setup checks again."
+                                        : check.name === "Basecamp Chat"
+                                          ? "Open Basecamp Chat once to "
+                                            + "initialize its backend. "
+                                            + "The Chat window can be closed "
+                                            + "after initialization."
+                                          : "Leave the connection fields "
+                                            + "empty to verify the managed "
+                                            + "Observer automatically."
+
+                                    color: "#cbd5e1"
+                                    font.pixelSize: 12
+                                    wrapMode: Text.Wrap
+                                }
+
+                                Button {
+                                    Layout.alignment: Qt.AlignLeft
+
+                                    visible: check.state !== "ready"
+                                        && (check.name === "Observer Service"
+                                            || check.name === "Authorized Devices"
+                                            || (check.name === "Conversations"
+                                                && root.backend
+                                                && root.backend.chatBridgeStatus
+                                                   === "Responding"
+                                                && root.backend.chatStatus
+                                                   === "Available"))
+
+                                    text: check.name === "Observer Service"
+                                        ? "Start Observer"
+                                        : check.name === "Authorized Devices"
+                                          ? "Generate Pairing QR"
+                                          : "Recheck Chat"
+
+                                    enabled: !!root.backend
+                                        && root.backend.ready
+                                        && (
+                                            check.name === "Observer Service"
+                                            ? !root.backend.serviceBusy
+                                              && root.backend.serviceStatus
+                                                 !== "running"
+                                              && root.backend.serviceStatus
+                                                 !== "starting"
+                                            : check.name === "Authorized Devices"
+                                              ? root.backend.serviceStatus
+                                                === "running"
+                                                && !root.backend.pairingBusy
+                                                && !root.backend.serviceBusy
+                                              : !root.backend.chatBusy
+                                        )
+
+                                    onClicked: {
+                                        if (check.name === "Observer Service") {
+                                            root.backend.startService();
+                                        } else if (
+                                            check.name === "Authorized Devices"
+                                        ) {
+                                            root.backend.createPairingOffer();
+                                        } else {
+                                            root.backend.checkChatHealth();
+                                        }
+                                    }
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: check.state !== "ready"
+                                        && check.name === "Authorized Devices"
+
+                                    text: "Scan the QR code in the "
+                                          + "Pair Device section below. "
+                                          + "After pairing, run setup checks."
+
+                                    color: "#94a3b8"
+                                    font.pixelSize: 12
                                     wrapMode: Text.Wrap
                                 }
                             }
