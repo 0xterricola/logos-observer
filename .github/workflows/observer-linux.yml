@@ -76,7 +76,7 @@ jobs:
           PID=$!
           HEALTH=000
 
-          for i in {1..40}; do
+          for _ in {1..40}; do
             HEALTH="$(curl -ks --max-time 2 -o /dev/null \
               -w '%{http_code}' "https://127.0.0.1:$PORT/health" || true)"
 
@@ -98,6 +98,42 @@ jobs:
           fi
 
           echo "PASS: Linux runtime smoke test"
+
+  linux-ui-package:
+    name: Build Linux x86_64 UI LGX
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Build and verify portable Observer UI
+        run: |
+          set -euo pipefail
+
+          OUT="$(nix build -L --no-link --print-out-paths             './integrations/basecamp-ui#packages.x86_64-linux.lgx-portable')"
+
+          PKG="$(find "$OUT" -maxdepth 2 -type f -name '*.lgx' -print -quit)"
+          test -n "$PKG"
+          test -s "$PKG"
+
+          nix run github:logos-co/logos-package#lgx --             verify "$PKG"
+
+          cp "$PKG" "$RUNNER_TEMP/observer-ui-linux-amd64.lgx"
+
+          echo "PASS: Linux Observer UI package verified"
+
+      - name: Upload Linux UI candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: observer-ui-linux-amd64
+          path: ${{ runner.temp }}/observer-ui-linux-amd64.lgx
+          if-no-files-found: error
+          retention-days: 7
 
   macos-package:
     name: Build and test macOS ARM64 LGX
