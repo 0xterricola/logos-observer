@@ -11,7 +11,7 @@ else()
 endif()
 
 logos_module(
-    NAME logos_observer_ui
+    NAME observer_ui
     REP_FILE src/ObserverManagerBackend.rep
     SOURCES
         src/ObserverManagerPluginInterface.h

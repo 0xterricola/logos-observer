@@ -32,7 +32,7 @@ def canonical_request_v2(
     body: bytes,
 ) -> bytes:
     """
-    Build the frozen Logos Observer v2 canonical request.
+    Build the frozen Observer v2 canonical request.
 
     request_target must already be the exact request-target as sent:
       /path

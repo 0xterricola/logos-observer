@@ -682,7 +682,7 @@ def main():
     )
 
     print(
-        "Logos Observer v2 HTTPS "
+        "Observer v2 HTTPS "
         f"listening on "
         f"{args.host}:{args.port}"
     )

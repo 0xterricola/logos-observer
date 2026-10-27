@@ -10,7 +10,7 @@ Rectangle {
     color: "#0b0d10"
 
     readonly property var backend:
-        logos ? logos.module("logos_observer_ui") : null
+        logos ? logos.module("observer_ui") : null
 
 
     property bool advancedSettingsExpanded: false
@@ -40,7 +40,7 @@ Rectangle {
             spacing: 20
 
         Label {
-            text: "Logos Observer"
+            text: "Observer"
             font.pixelSize: 28
             font.bold: true
             color: "#ffffff"

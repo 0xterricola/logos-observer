@@ -1319,7 +1319,7 @@ def serve():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Logos Observer v1",
+        description="Observer v1",
     )
 
     sub = parser.add_subparsers(

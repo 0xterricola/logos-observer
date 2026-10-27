@@ -137,7 +137,7 @@ def create_local_pairing_offer(
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Create a local-only Logos Observer "
+            "Create a local-only Observer "
             "v2 pairing offer."
         )
     )
@@ -165,7 +165,7 @@ def main():
 
     parser.add_argument(
         "--name",
-        default="Logos Observer",
+        default="Observer",
     )
 
     parser.add_argument(
@@ -230,7 +230,7 @@ def main():
         return
 
     print()
-    print("Logos Observer v2 pairing offer")
+    print("Observer v2 pairing offer")
     print(
         "Endpoint:",
         offer["endpoint"],

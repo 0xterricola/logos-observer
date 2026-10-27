@@ -10,15 +10,14 @@ else()
 endif()
 
 logos_module(
-    NAME logos_observer
+    NAME observer
     SOURCES
-        src/logos_observer_impl.h
-        src/logos_observer_impl.cpp
+        src/observer_impl.h
+        src/observer_impl.cpp
         src/managed_observer_service.h
         src/managed_observer_service.cpp
         src/observer_health.h
         src/observer_health.cpp
-        src/chat_health.cpp
         src/chat_health.cpp
 )
 
@@ -27,7 +26,7 @@ find_package(CURL REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(nlohmann_json CONFIG REQUIRED)
 
-target_link_libraries(logos_observer_module_plugin
+target_link_libraries(observer_module_plugin
     PRIVATE
         CURL::libcurl
         OpenSSL::Crypto

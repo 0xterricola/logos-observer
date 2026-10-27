@@ -5,10 +5,10 @@
 
 #include <logos_module_context.h>
 
-class LogosObserverImpl : public LogosModuleContext {
+class ObserverImpl : public LogosModuleContext {
 public:
-    LogosObserverImpl();
-    ~LogosObserverImpl();
+    ObserverImpl();
+    ~ObserverImpl();
 
     // Returns the module's current state.
     std::string getInfo();

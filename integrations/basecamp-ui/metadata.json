@@ -1,15 +1,15 @@
 {
-  "name": "logos_observer_ui",
-  "display_name": "Observer Manager",
+  "name": "observer_ui",
+  "display_name": "Observer",
   "version": "0.1.3",
   "type": "ui_qml",
   "category": "system",
-  "description": "Graphical setup, monitoring, and management for Logos Observer",
+  "description": "Graphical setup, monitoring, and management for Observer",
   "author": "0xterricola",
-  "main": "logos_observer_ui_plugin",
+  "main": "observer_ui_plugin",
   "view": "qml/ObserverManagerView.qml",
   "dependencies": [
-    "logos_observer"
+    "observer"
   ],
   "nix": {
     "packages": {

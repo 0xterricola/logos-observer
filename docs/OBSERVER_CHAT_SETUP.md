@@ -1,10 +1,10 @@
-# Logos Observer — Basecamp Chat to Casberi (CLI Setup)
+# Observer — Basecamp Chat to Casberi (CLI Setup)
 
 **Status:** Current CLI-based setup (developer preview)  
 **Tested setup:** macOS (Apple Silicon), Logos Basecamp Chat, local JSON-RPC bridge, and a Casberi iOS build supporting Observer v2 Chat pairing  
 **Purpose:** Read your existing Basecamp Chat conversations in Casberi on the same local network.
 
-This guide uses the **standalone Logos Observer v2 Python CLI**. You do **not** need to build or install the separate `logos_observer` or `logos_observer_ui` Basecamp plugins for this Chat-only setup. No automatic UI setup or service management is assumed.
+This guide uses the **standalone Observer v2 Python CLI**. You do **not** need to build or install the separate `observer` or `observer_ui` Basecamp plugins for this Chat-only setup. No automatic UI setup or service management is assumed.
 
 **Current limitation:** This connection is **read-only**. Keep using Basecamp Chat on your computer to send messages. Your computer, Basecamp Chat, local bridge, and Observer must stay running while Casberi reads chats.
 
@@ -31,15 +31,15 @@ nc -z 127.0.0.1 8645 && echo "Bridge port is reachable"
 
 **Expected:** `Bridge port is reachable`. This tests only whether the local port is open; it does **not** establish that the Chat module is initialized or returning conversations. If the command fails, resolve the Basecamp bridge installation/loading before continuing.
 
-## Step 2 — Download Logos Observer
+## Step 2 — Download Observer
 
 Run these commands in Terminal:
 
 ```bash
 mkdir -p ~/Developer
 cd ~/Developer
-git clone https://github.com/0xterricola/logos-observer.git
-cd logos-observer
+git clone https://github.com/0xterricola/observer.git
+cd observer
 ```
 
 If you already cloned the repository, use your existing copy instead; do not clone over it.
@@ -48,7 +48,7 @@ The CLI implementation is in `v2_server.py` and `v2_pair_cli.py`. No `.lgx` pack
 
 ## Step 3 — Install the Python dependency
 
-From inside the `logos-observer` directory:
+From inside the `observer` directory:
 
 ```bash
 python3 -m venv .venv
@@ -79,7 +79,7 @@ Replace that example with your **actual** Mac LAN IP. Run the command that sets 
 Keep Basecamp Chat and the JSON-RPC bridge running. In **Terminal tab 1**, from the repo directory:
 
 ```bash
-cd ~/Developer/logos-observer
+cd ~/Developer/observer
 LAN_IP=$(ipconfig getifaddr en0)
 
 ./.venv/bin/python v2_server.py \
@@ -99,7 +99,7 @@ The port `8444` is the Chat preview example, not the protocol default. Do not fo
 In **Terminal tab 2**, while Observer is still running in tab 1:
 
 ```bash
-cd ~/Developer/logos-observer
+cd ~/Developer/observer
 LAN_IP=$(ipconfig getifaddr en0)
 
 curl --silent --show-error --fail --max-time 5 \
@@ -120,7 +120,7 @@ This confirms the local Observer HTTPS health endpoint and certificate trust. **
 In **Terminal tab 2**, with tab 1 still running:
 
 ```bash
-cd ~/Developer/logos-observer
+cd ~/Developer/observer
 LAN_IP=$(ipconfig getifaddr en0)
 
 ./.venv/bin/python v2_pair_cli.py \
@@ -194,8 +194,8 @@ To restart, use the same **Step 5** command and the **same state directory** (`.
 
 ## References
 
-- [Logos Observer repository and CLI documentation](https://github.com/0xterricola/logos-observer)
-- [Observer v2 pairing CLI source](https://github.com/0xterricola/logos-observer/blob/main/v2_pair_cli.py)
-- [Observer v2 server source](https://github.com/0xterricola/logos-observer/blob/main/v2_server.py)
+- [Observer repository and CLI documentation](https://github.com/0xterricola/observer)
+- [Observer v2 pairing CLI source](https://github.com/0xterricola/observer/blob/main/v2_pair_cli.py)
+- [Observer v2 server source](https://github.com/0xterricola/observer/blob/main/v2_server.py)
 - [Official Basecamp installation documentation](https://docs.logos.co/basecamp/install-logos-basecamp)
 - [Official Basecamp module installation documentation](https://docs.logos.co/basecamp/install-and-load-a-module-in-logos-basecamp)
