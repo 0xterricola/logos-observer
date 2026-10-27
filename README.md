@@ -6,6 +6,15 @@ Observer provides CLI-first monitoring, diagnostics, and secure read-only access
 
 Observer runs alongside infrastructure you control, without requiring a centralized monitoring service.
 
+## Install with Logos Basecamp
+
+Install Observer directly through Basecamp's Package Manager
+using the public Observer repository.
+
+**[Step-by-step installation guide](docs/INSTALL_BASECAMP.md)**
+
+Supported platforms: macOS ARM64 (Apple Silicon) and Linux x86-64.
+
 ## Overview
 
 Observer has three complementary components:
