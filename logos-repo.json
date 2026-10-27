@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "name": "observer",
+  "displayName": "Observer",
+  "description": "Local-first monitoring and secure read-only access for Logos nodes and Basecamp Chat.",
+  "homepage": "https://github.com/0xterricola/observer",
+  "indexUrl": "https://github.com/0xterricola/observer/releases/download/index/index.json",
+  "trustedSigners": []
+}

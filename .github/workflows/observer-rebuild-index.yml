@@ -1,0 +1,19 @@
+name: Observer Catalogue Index
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types:
+      - rebuild-index
+
+permissions:
+  contents: write
+
+concurrency:
+  group: observer-catalogue-publishing
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    name: Rebuild Observer Index
+    uses: logos-co/logos-modules-release-action/.github/workflows/rebuild-index.yml@v1

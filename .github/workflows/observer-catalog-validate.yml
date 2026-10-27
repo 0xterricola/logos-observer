@@ -1,0 +1,46 @@
+name: Observer Catalogue Validation
+
+on:
+  push:
+    paths:
+      - logos-repo.json
+      - .github/workflows/observer-catalog-validate.yml
+  pull_request:
+    paths:
+      - logos-repo.json
+      - .github/workflows/observer-catalog-validate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Observer Catalogue
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Observer
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Get official Logos catalogue tool
+        run: |
+          git clone --depth 1 \
+            https://github.com/logos-co/logos-modules-release-tool.git \
+            /tmp/logos-release-tool
+
+      - name: Validate catalogue
+        run: |
+          set -euo pipefail
+
+          python /tmp/logos-release-tool/index.py \
+            validate-repo logos-repo.json \
+            --self-url \
+            https://raw.githubusercontent.com/0xterricola/observer/main/logos-repo.json
+
+          echo "PASS: Observer catalogue validated"
