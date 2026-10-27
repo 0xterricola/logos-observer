@@ -5,5 +5,10 @@
   "description": "Local-first monitoring and secure read-only access for Logos nodes and Basecamp Chat.",
   "homepage": "https://github.com/0xterricola/observer",
   "indexUrl": "https://github.com/0xterricola/observer/releases/download/index/index.json",
-  "trustedSigners": []
+  "trustedSigners": [
+    {
+      "did": "did:jwk:eyJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6Img3X3pBZmN5SWthbGhBNzRqT0dSVnFBaldveWRtT3hBUFY0WWY1YnN4Z0kifQ",
+      "name": "Observer Release"
+    }
+  ]
 }

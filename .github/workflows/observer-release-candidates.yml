@@ -1,0 +1,165 @@
+name: Observer Cross-Platform Release Candidates
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/observer-release-candidates.yml
+      - integrations/basecamp/**
+      - integrations/basecamp-ui/**
+      - logos-repo.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.module }} / ${{ matrix.variant }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - module: core
+            variant: darwin-arm64
+            runner: macos-15
+          - module: core
+            variant: linux-amd64
+            runner: ubuntu-24.04
+          - module: ui
+            variant: darwin-arm64
+            runner: macos-15
+          - module: ui
+            variant: linux-amd64
+            runner: ubuntu-24.04
+
+    steps:
+      - name: Checkout Observer
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Build and verify package
+        env:
+          MODULE: ${{ matrix.module }}
+          VARIANT: ${{ matrix.variant }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DEST="$RUNNER_TEMP/$MODULE-$VARIANT.lgx"
+
+          if [[ "$MODULE" == core && "$VARIANT" == darwin-arm64 ]]; then
+            ./integrations/basecamp/scripts/package-portable-macos.sh "$DEST"
+          else
+            if [[ "$MODULE" == core ]]; then
+              SOURCE="./integrations/basecamp"
+            else
+              SOURCE="./integrations/basecamp-ui"
+            fi
+
+            case "$VARIANT" in
+              darwin-arm64) SYSTEM="aarch64-darwin" ;;
+              linux-amd64) SYSTEM="x86_64-linux" ;;
+              *) echo "Unsupported variant: $VARIANT" >&2; exit 1 ;;
+            esac
+
+            OUTPUT_DIR="$(nix build -L --no-link --print-out-paths "$SOURCE#packages.$SYSTEM.lgx-portable")"
+            PKG="$(find "$OUTPUT_DIR" -maxdepth 2 -type f -name '*.lgx' -print -quit)"
+            test -n "$PKG"
+            cp "$PKG" "$DEST"
+          fi
+
+          test -s "$DEST"
+
+          nix run github:logos-co/logos-package#lgx -- verify "$DEST"
+
+          echo "PASS: $MODULE / $VARIANT"
+
+      - name: Upload package candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: observer-candidate-${{ matrix.module }}-${{ matrix.variant }}
+          path: ${{ runner.temp }}/${{ matrix.module }}-${{ matrix.variant }}.lgx
+          if-no-files-found: error
+          retention-days: 7
+
+  merge:
+    name: Merge and verify ${{ matrix.module }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    strategy:
+      matrix:
+        module:
+          - core
+          - ui
+
+    steps:
+      - name: Checkout Observer
+        uses: actions/checkout@v4
+
+      - name: Download platform candidates
+        uses: actions/download-artifact@v4
+        with:
+          pattern: observer-candidate-${{ matrix.module }}-*
+          path: candidates
+          merge-multiple: true
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Merge and verify variants
+        shell: bash
+        env:
+          MODULE: ${{ matrix.module }}
+        run: |
+          set -euo pipefail
+
+          LGX_DIR="$(nix build --no-link --print-out-paths 'github:logos-co/logos-package#lgx')"
+          LGX="$LGX_DIR/bin/lgx"
+
+          MAC="candidates/$MODULE-darwin-arm64.lgx"
+          LINUX="candidates/$MODULE-linux-amd64.lgx"
+          OUT="output/$MODULE.lgx"
+
+          test -s "$MAC"
+          test -s "$LINUX"
+          mkdir -p output
+
+          "$LGX" merge "$MAC" "$LINUX" -o "$OUT" -y
+          "$LGX" verify "$OUT"
+
+          if [[ "$MODULE" == core ]]; then
+            META="integrations/basecamp/metadata.json"
+          else
+            META="integrations/basecamp-ui/metadata.json"
+          fi
+
+          NAME="$(jq -r .name "$META")"
+          VERSION="$(jq -r .version "$META")"
+
+          "$LGX" manifest "$OUT" --json |
+            jq -e --arg name "$NAME" --arg version "$VERSION" '
+              .name == $name and
+              .version == $version and
+              (.main | has("darwin-arm64") and has("linux-amd64"))
+            '
+
+          test -z "$("$LGX" signature "$OUT")"
+
+          echo "PASS: $NAME v$VERSION"
+          echo "PASS: Both portable variants included"
+          echo "PASS: Package ready for protected signing"
+
+      - name: Upload merged release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: observer-merged-${{ matrix.module }}
+          path: output/${{ matrix.module }}.lgx
+          if-no-files-found: error
+          retention-days: 7
