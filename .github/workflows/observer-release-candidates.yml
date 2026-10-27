@@ -163,3 +163,88 @@ jobs:
           path: output/${{ matrix.module }}.lgx
           if-no-files-found: error
           retention-days: 7
+
+  sign:
+    name: Protected Observer Release Signing
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: merge
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+
+      - name: Download merged packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: observer-merged-*
+          path: unsigned
+          merge-multiple: true
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Sign and verify Observer packages
+        shell: bash
+        env:
+          KEY_JWK: ${{ secrets.OBSERVER_RELEASE_JWK }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          test -n "${KEY_JWK:-}" || {
+            echo "Missing protected signing secret" >&2
+            exit 1
+          }
+
+          LGX_DIR="$(nix build --no-link --print-out-paths 'github:logos-co/logos-package#lgx')"
+          LGX="$LGX_DIR/bin/lgx"
+
+          KEY_DIR="$RUNNER_TEMP/observer-signing-keys"
+          TRUST_DIR="$RUNNER_TEMP/observer-trust"
+
+          mkdir -p "$KEY_DIR" "$TRUST_DIR" signed
+          trap 'rm -rf "$KEY_DIR"' EXIT
+
+          printf '%s' "$KEY_JWK" > "$KEY_DIR/observer-release.jwk"
+          unset KEY_JWK
+
+          DID="$(jq -er '.trustedSigners[] | select(.name == "Observer Release") | .did' logos-repo.json)"
+
+          "$LGX" keyring add observer-release "$DID" \
+            --dir "$TRUST_DIR"
+
+          for module in core ui; do
+            SOURCE="unsigned/$module.lgx"
+            DEST="signed/$module.lgx"
+
+            test -s "$SOURCE"
+            cp "$SOURCE" "$DEST"
+
+            "$LGX" verify "$DEST"
+
+            "$LGX" sign "$DEST" \
+              --key observer-release \
+              --keys-dir "$KEY_DIR" \
+              --name "Observer Release" \
+              --url "https://github.com/0xterricola/observer"
+
+            "$LGX" verify "$DEST" \
+              --keyring-dir "$TRUST_DIR"
+
+            ACTUAL="$("$LGX" signature "$DEST" | jq -er .did)"
+            test "$ACTUAL" = "$DID"
+
+            echo "PASS: Signed and verified Observer $module"
+          done
+
+      - name: Upload signed candidates
+        uses: actions/upload-artifact@v4
+        with:
+          name: observer-signed-multiplatform
+          path: signed/*.lgx
+          if-no-files-found: error
+          retention-days: 7
