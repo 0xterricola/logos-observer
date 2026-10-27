@@ -8,6 +8,12 @@ on:
       - integrations/basecamp-ui/**
       - logos-repo.json
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish signed Core and UI packages to GitHub Releases
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -248,3 +254,216 @@ jobs:
           path: signed/*.lgx
           if-no-files-found: error
           retention-days: 7
+
+  publish:
+    name: Publish signed Observer releases
+    needs: sign
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: observer-release-publishing
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout Observer
+        uses: actions/checkout@v4
+
+      - name: Download signed packages
+        uses: actions/download-artifact@v4
+        with:
+          name: observer-signed-multiplatform
+          path: signed
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Verify packages and prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LGX_DIR="$(nix build --no-link --print-out-paths 'github:logos-co/logos-package#lgx')"
+          LGX="$LGX_DIR/bin/lgx"
+
+          TRUST="$RUNNER_TEMP/observer-release-trust"
+          mkdir -p "$TRUST" dist
+
+          DID="$(jq -er '.trustedSigners[] | select(.name == "Observer Release") | .did' logos-repo.json)"
+          "$LGX" keyring add observer-release "$DID" --dir "$TRUST"
+
+          for module in core ui; do
+            if [[ "$module" == core ]]; then
+              META="integrations/basecamp/metadata.json"
+              EXPECTED_NAME="observer"
+            else
+              META="integrations/basecamp-ui/metadata.json"
+              EXPECTED_NAME="observer_ui"
+            fi
+
+            NAME="$(jq -er .name "$META")"
+            VERSION="$(jq -er .version "$META")"
+            test "$NAME" = "$EXPECTED_NAME"
+
+            SOURCE="signed/$module.lgx"
+            TARGET_DIR="dist/$NAME"
+            TARGET="$TARGET_DIR/$NAME-$VERSION.lgx"
+            TAG="$NAME-v$VERSION"
+
+            test -s "$SOURCE"
+            mkdir -p "$TARGET_DIR"
+            cp "$SOURCE" "$TARGET"
+
+            "$LGX" verify "$TARGET" --keyring-dir "$TRUST"
+
+            MANIFEST="$("$LGX" manifest "$TARGET" --json)"
+            SIGNATURE="$("$LGX" signature "$TARGET")"
+
+            jq -e \
+              --arg name "$NAME" \
+              --arg version "$VERSION" \
+              '.name == $name and
+               .version == $version and
+               (.main | has("darwin-arm64") and has("linux-amd64"))' \
+              <<< "$MANIFEST" >/dev/null
+
+            jq -e --arg did "$DID" \
+              '.did == $did' <<< "$SIGNATURE" >/dev/null
+
+            SHA="$(sha256sum "$TARGET" | awk '{print $1}')"
+            SIZE="$(stat -c%s "$TARGET")"
+            ROOT="$(jq -r '.hashes.root // ""' <<< "$MANIFEST")"
+
+            jq -n \
+              --arg publisherRef "$TAG" \
+              --arg releasedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --arg sha256 "$SHA" \
+              --argjson size "$SIZE" \
+              --arg rootHash "$ROOT" \
+              --argjson manifest "$MANIFEST" \
+              --argjson signature "$SIGNATURE" \
+              '{
+                publisherRef: $publisherRef,
+                releasedAt: $releasedAt,
+                sha256: $sha256,
+                size: $size,
+                rootHash: $rootHash,
+                builtVariants: ["darwin-arm64", "linux-amd64"],
+                missingVariants: [],
+                manifest: $manifest,
+                signature: $signature
+              }' > "$TARGET_DIR/sidecar.json"
+
+            echo "$TAG" > "$TARGET_DIR/tag.txt"
+
+            echo "PASS: $TAG verified and staged"
+          done
+
+      - name: Refuse existing release versions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          for module in observer observer_ui; do
+            TAG="$(cat "dist/$module/tag.txt")"
+
+            if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+              echo "::error::Release already exists: $TAG"
+              exit 1
+            fi
+
+            if gh api "repos/$GH_REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+              echo "::error::Tag already exists: $TAG"
+              exit 1
+            fi
+
+            echo "PASS: $TAG is not already published"
+          done
+
+      - name: Stage signed releases as drafts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          for module in observer observer_ui; do
+            TAG="$(cat "dist/$module/tag.txt")"
+
+            gh release create "$TAG" \
+              "dist/$module/"*.lgx \
+              "dist/$module/sidecar.json" \
+              --repo "$GH_REPO" \
+              --target "$GITHUB_SHA" \
+              --title "${TAG/-v/ v}" \
+              --notes "Signed portable release for macOS ARM64 and Linux x86-64." \
+              --latest=false \
+              --draft
+
+            echo "PASS: Staged $TAG as draft"
+          done
+
+      - name: Verify staged release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          for module in observer observer_ui; do
+            TAG="$(cat "dist/$module/tag.txt")"
+            VERSION="${TAG#"$module"-v}"
+            PACKAGE="$module-$VERSION.lgx"
+
+            gh release view "$TAG" \
+              --repo "$GH_REPO" \
+              --json isDraft,assets \
+              | jq -e --arg package "$PACKAGE" '
+                  .isDraft == true and
+                  ([.assets[].name] | sort) ==
+                  ([$package, "sidecar.json"] | sort)
+                ' >/dev/null
+
+            echo "PASS: $TAG contains both required assets"
+          done
+
+      - name: Publish verified drafts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          for module in observer observer_ui; do
+            TAG="$(cat "dist/$module/tag.txt")"
+
+            gh release edit "$TAG" \
+              --repo "$GH_REPO" \
+              --draft=false \
+              --latest=false
+
+            echo "PASS: Published $TAG"
+          done
+
+      - name: Request Basecamp catalogue rebuild
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          gh api \
+            -X POST \
+            "repos/$GH_REPO/dispatches" \
+            -f event_type=rebuild-index
+
+          echo "PASS: Catalogue index rebuild requested"
