@@ -1,0 +1,55 @@
+name: Observer Core Release Candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-core:
+    name: Build and Test Observer Core
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout Observer
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Verify runner architecture
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+
+      - name: Build and smoke-test portable Core
+        run: |
+          set -euo pipefail
+
+          ./integrations/basecamp/scripts/package-portable-macos.sh \
+            "$RUNNER_TEMP/observer-core.lgx"
+
+      - name: Verify release candidate
+        run: |
+          set -euo pipefail
+
+          PKG="$RUNNER_TEMP/observer-core.lgx"
+          test -s "$PKG"
+
+          nix run github:logos-co/logos-package#lgx -- \
+            verify "$PKG"
+
+          tar -tzf "$PKG" | grep -F \
+            'variants/darwin-arm64/observer_plugin.dylib' >/dev/null
+
+          echo "PASS: Observer Core release candidate"
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: observer-core-macos-arm64
+          path: ${{ runner.temp }}/observer-core.lgx
+          if-no-files-found: error
+          retention-days: 7
