@@ -14,7 +14,7 @@ fi
   --noconfirm \
   --clean \
   --onedir \
-  --name logos-observer \
+  --name observer \
   --target-arch arm64 \
   --paths "$ROOT/integrations/basecamp/runtime" \
   --distpath "$OUT/dist" \
@@ -22,10 +22,11 @@ fi
   --specpath "$OUT/spec" \
   "$ROOT/integrations/basecamp/runtime/v2_server.py"
 
-BUNDLE="$OUT/dist/logos-observer"
+BUNDLE="$OUT/dist/observer"
+ln -sfn observer "$BUNDLE/logos-observer"
 
 echo "=== PORTABLE EXECUTABLE ==="
-file "$BUNDLE/logos-observer"
+file "$BUNDLE/observer"
 
 echo "=== BUNDLE SIZE ==="
 du -sh "$BUNDLE"

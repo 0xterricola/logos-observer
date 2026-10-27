@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-OUTPUT="${1:-/tmp/logos-observer-release-candidate.lgx}"
+OUTPUT="${1:-/tmp/observer-release-candidate.lgx}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp/}logos-package.XXXXXX")"
 
 trap 'rm -rf "$WORK"' EXIT
@@ -11,7 +11,7 @@ echo "=== BUILD PORTABLE MODULE ==="
 nix build -L "$ROOT/integrations/basecamp#lgx-portable" \
   --out-link "$WORK/built"
 
-SOURCE="$WORK/built/logos-logos_observer-module-lib.lgx"
+SOURCE="$WORK/built/logos-observer-module-lib.lgx"
 REPAIRED="$WORK/repaired.lgx"
 
 echo "=== REPAIR MACH-O DEPENDENCIES ==="
@@ -29,7 +29,7 @@ nix run github:logos-co/logos-package#lgx -- \
   add "$OUTPUT" \
   --variant darwin-arm64 \
   --files "$WORK/extracted/variants/darwin-arm64" \
-  --main logos_observer_plugin.dylib \
+  --main observer_plugin.dylib \
   -y
 
 echo "=== VERIFY FINAL PACKAGE ==="
@@ -44,7 +44,7 @@ echo "=== PORTABLE RUNTIME SMOKE TEST ==="
   mkdir -p "$TEST"
   tar -xzf "$OUTPUT" -C "$TEST"
 
-  BIN="$TEST/assets/lidl/observer-runtime/portable-macos-arm64/logos-observer"
+  BIN="$TEST/assets/lidl/observer-runtime/portable-macos-arm64/observer"
   test -x "$BIN"
 
   echo "=== BUNDLED PAIRING CLI SMOKE TEST ==="

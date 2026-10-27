@@ -58,7 +58,7 @@ ObserverManagerBackend::ObserverManagerBackend(
     LogosAPI* api,
     QObject* parent)
     : ObserverManagerBackendSimpleSource(parent),
-      m_api(api ? api : new LogosAPI("logos_observer_ui", this)),
+      m_api(api ? api : new LogosAPI("observer_ui", this)),
       m_modules(new LogosModules(m_api))
 {
     setReady(true);
@@ -156,7 +156,7 @@ void ObserverManagerBackend::checkHealth(
 
     QPointer<ObserverManagerBackend> guard(this);
 
-    m_modules->logos_observer.getHealthAsyncResult(
+    m_modules->observer.getHealthAsyncResult(
         configJson,
         [guard](logos::AsyncResult<QString> outcome) {
             const bool succeeded = outcome.ok();
@@ -230,7 +230,7 @@ void ObserverManagerBackend::checkDeviceSummary()
 
     QPointer<ObserverManagerBackend> guard(this);
 
-    m_modules->logos_observer.getDeviceSummaryAsyncResult(
+    m_modules->observer.getDeviceSummaryAsyncResult(
         [guard](logos::AsyncResult<QString> outcome) {
             const bool succeeded = outcome.ok();
             const QString payload = outcome.value;
@@ -337,7 +337,7 @@ void ObserverManagerBackend::checkChatHealth()
 
     QPointer<ObserverManagerBackend> guard(this);
 
-    m_modules->logos_observer.getChatHealthAsyncResult(
+    m_modules->observer.getChatHealthAsyncResult(
         [guard](logos::AsyncResult<QString> outcome) {
             const bool succeeded = outcome.ok();
             const QString result = outcome.value;
@@ -491,7 +491,7 @@ void ObserverManagerBackend::refreshServiceStatus()
 
     QPointer<ObserverManagerBackend> guard(this);
 
-    m_modules->logos_observer.getServiceStatusAsyncResult(
+    m_modules->observer.getServiceStatusAsyncResult(
         [guard](logos::AsyncResult<QString> outcome) {
             const bool succeeded = outcome.ok();
             const QString payload = outcome.value;
@@ -522,7 +522,7 @@ void ObserverManagerBackend::startService()
 
     QPointer<ObserverManagerBackend> guard(this);
 
-    m_modules->logos_observer.startServiceAsyncResult(
+    m_modules->observer.startServiceAsyncResult(
         [guard](logos::AsyncResult<QString> outcome) {
             const bool succeeded = outcome.ok();
             const QString payload = outcome.value;
@@ -553,7 +553,7 @@ void ObserverManagerBackend::stopService()
 
     QPointer<ObserverManagerBackend> guard(this);
 
-    m_modules->logos_observer.stopServiceAsyncResult(
+    m_modules->observer.stopServiceAsyncResult(
         [guard](logos::AsyncResult<QString> outcome) {
             const bool succeeded = outcome.ok();
             const QString payload = outcome.value;
@@ -588,7 +588,7 @@ void ObserverManagerBackend::createPairingOffer()
 
     QPointer<ObserverManagerBackend> guard(this);
 
-    m_modules->logos_observer.createPairingOfferAsyncResult(
+    m_modules->observer.createPairingOfferAsyncResult(
         [guard](logos::AsyncResult<QString> outcome) {
             const bool succeeded = outcome.ok();
             const QString payload = outcome.value;

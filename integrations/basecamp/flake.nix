@@ -1,5 +1,5 @@
 {
-  description = "Logos Observer - Basecamp integration module";
+  description = "Observer - Basecamp integration module";
 
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder";
@@ -15,7 +15,7 @@
             ps.cryptography
           ]);
         in pkgs.stdenvNoCC.mkDerivation {
-        pname = "logos-observer-portable";
+        pname = "observer-portable";
         version = "0.1.4";
 
         src = ./runtime;
@@ -46,7 +46,7 @@
             --noconfirm \
             --clean \
             --onedir \
-            --name logos-observer \
+            --name observer \
             --paths "$PWD" \
             --hidden-import=v2_pair_cli \
             --distpath "$out" \
@@ -54,11 +54,12 @@
             --specpath "$TMPDIR" \
             ./v2_server.py
 
-          test -x "$out/logos-observer/logos-observer"
+          test -x "$out/observer/observer"
+          ln -s observer "$out/observer/logos-observer"
 
         '' + pkgs.lib.optionalString isDarwin ''
           # Repair Nix-derived OpenSSL paths after PyInstaller collection.
-          internal="$out/logos-observer/_internal"
+          internal="$out/observer/_internal"
           rust="$internal/cryptography/hazmat/bindings/_rust.abi3.so"
           ssl="$(find "$internal/lib-dynload" -name '_ssl*.so' -print -quit)"
           hashlib="$(find "$internal/lib-dynload" -name '_hashlib*.so' -print -quit)"
@@ -124,7 +125,7 @@
         in pkgs.lib.optionalString supported ''
           mkdir -p "$out/share/logos/observer-runtime"
 
-          cp -R ${portableRuntimeFor { inherit pkgs system; }}/logos-observer \
+          cp -R ${portableRuntimeFor { inherit pkgs system; }}/observer \
             "$out/share/logos/observer-runtime/${runtimeName}"
         '';
     };

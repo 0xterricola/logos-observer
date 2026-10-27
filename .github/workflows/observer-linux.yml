@@ -31,16 +31,16 @@ jobs:
 
       - name: Inspect Linux package
         run: |
-          PKG="result-linux/logos-logos_observer-module-lib.lgx"
+          PKG="result-linux/logos-observer-module-lib.lgx"
           test -f "$PKG"
           ls -lh "$PKG"
           tar -tzf "$PKG" |
-            grep 'portable-linux-x86_64/logos-observer'
+            grep 'portable-linux-x86_64/observer'
 
       - name: Verify LGX integrity
         run: |
           nix run github:logos-co/logos-package#lgx -- \
-            verify result-linux/logos-logos_observer-module-lib.lgx
+            verify result-linux/logos-observer-module-lib.lgx
 
 
       - name: Smoke-test Linux Observer runtime
@@ -59,9 +59,9 @@ jobs:
           }
           trap cleanup EXIT
 
-          tar -xzf result-linux/logos-logos_observer-module-lib.lgx -C "$TEST"
+          tar -xzf result-linux/logos-observer-module-lib.lgx -C "$TEST"
 
-          BIN="$TEST/assets/lidl/observer-runtime/portable-linux-x86_64/logos-observer"
+          BIN="$TEST/assets/lidl/observer-runtime/portable-linux-x86_64/observer"
           test -x "$BIN"
 
           PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
@@ -114,4 +114,4 @@ jobs:
       - name: Build, verify, and smoke-test macOS package
         run: |
           ./integrations/basecamp/scripts/package-portable-macos.sh \
-            /tmp/logos-observer-macos-ci.lgx
+            /tmp/observer-macos-ci.lgx

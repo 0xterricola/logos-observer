@@ -29,7 +29,7 @@ public:
 
     QString name() const override
     {
-        return QStringLiteral("logos_observer_ui");
+        return QStringLiteral("observer_ui");
     }
 
     QString version() const override

@@ -1,4 +1,4 @@
-#include "logos_observer_impl.h"
+#include "observer_impl.h"
 #include "observer_network_config.h"
 #include "observer_health.h"
 #include <nlohmann/json.hpp>
@@ -19,30 +19,30 @@
 #include <filesystem>
 #endif
 
-LogosObserverImpl::LogosObserverImpl() = default;
+ObserverImpl::ObserverImpl() = default;
 
-LogosObserverImpl::~LogosObserverImpl() = default;
+ObserverImpl::~ObserverImpl() = default;
 
-std::string LogosObserverImpl::getInfo() {
+std::string ObserverImpl::getInfo() {
     return R"json({
-        "module": "logos_observer",
+        "module": "observer",
         "version": "0.1.4",
         "managed_service": "manual"
     })json";
 }
 
-void LogosObserverImpl::onContextReady() {
+void ObserverImpl::onContextReady() {
     // Service management will be implemented in a later milestone.
     // Do not automatically start another Observer instance.
 }
 
-LogosShutdown LogosObserverImpl::aboutToUnload() {
+LogosShutdown ObserverImpl::aboutToUnload() {
     managedService_.stop();
     return LogosShutdown::Synchronous;
 }
 
 
-std::string LogosObserverImpl::getHealth(
+std::string ObserverImpl::getHealth(
     const std::string& configJson
 ) {
     return probeObserverHealth(configJson);
@@ -52,7 +52,7 @@ std::string LogosObserverImpl::getHealth(
 // Implemented in chat_health.cpp.
 std::string probeChatHealth();
 
-std::string LogosObserverImpl::getChatHealth() {
+std::string ObserverImpl::getChatHealth() {
     return probeChatHealth();
 }
 
@@ -77,10 +77,10 @@ std::string bundledObserverPath() {
 
 #if defined(__APPLE__)
     constexpr const char* runtimeRelative =
-        "assets/lidl/observer-runtime/portable-macos-arm64/logos-observer";
+        "assets/lidl/observer-runtime/portable-macos-arm64/observer";
 #else
     constexpr const char* runtimeRelative =
-        "assets/lidl/observer-runtime/portable-linux-x86_64/logos-observer";
+        "assets/lidl/observer-runtime/portable-linux-x86_64/observer";
 #endif
 
     return (modulePath.parent_path() / runtimeRelative).string();
@@ -97,7 +97,7 @@ std::string serviceResultJson(const ManagedObserverResult& result) {
 }
 }
 
-std::string LogosObserverImpl::startService() {
+std::string ObserverImpl::startService() {
     const char* python = std::getenv("LOGOS_OBSERVER_PYTHON");
     const char* runtime = std::getenv("LOGOS_OBSERVER_RUNTIME_DIR");
 
@@ -145,18 +145,18 @@ std::string LogosObserverImpl::startService() {
 #endif
 }
 
-std::string LogosObserverImpl::getServiceStatus() {
+std::string ObserverImpl::getServiceStatus() {
     return serviceResultJson(managedService_.status());
 }
 
-std::string LogosObserverImpl::stopService() {
+std::string ObserverImpl::stopService() {
     return serviceResultJson(managedService_.stop());
 }
 
 extern char **environ;
 
 
-std::string LogosObserverImpl::getDeviceSummary() {
+std::string ObserverImpl::getDeviceSummary() {
     const auto fail = [] {
         return nlohmann::json{
             {"ok", false},
@@ -372,7 +372,7 @@ std::string LogosObserverImpl::getDeviceSummary() {
 #endif
 }
 
-std::string LogosObserverImpl::createPairingOffer() {
+std::string ObserverImpl::createPairingOffer() {
     auto fail = [](const char* error) {
         return nlohmann::json{
             {"ok", false}, {"error", error}
@@ -380,7 +380,7 @@ std::string LogosObserverImpl::createPairingOffer() {
     };
 
     // Never expose pairing credentials to unrelated modules.
-    if (!logos::currentCaller().isModule("logos_observer_ui")) {
+    if (!logos::currentCaller().isModule("observer_ui")) {
         return fail("forbidden");
     }
 
