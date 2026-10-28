@@ -7,6 +7,31 @@ You can install Observer directly through Logos Basecamp's
 Package Manager. No command-line tools, Nix builds, or manual
 `.lgx` downloads are required.
 
+## Quick Start
+
+Install Observer through Logos Basecamp in six steps.
+
+Supported: macOS Apple Silicon and Linux x86-64.
+
+1. Open **Basecamp > Package Manager > Manage Repositories**.
+2. Add the Observer repository URL below and make sure it is **Enabled**.
+3. Return to Package Manager, search for **Observer**, and install **Observer Core** first, then **Observer UI**.
+4. Open **Settings > Module Inspector** and load Observer Core. Then open **Settings > Apps Inspector** and load Observer UI.
+5. Open **Observer** from the Basecamp sidebar and follow the Setup Readiness checks.
+6. To pair a mobile client, generate a pairing QR in Observer and scan it with the client device. Both devices must be on the same trusted local network.
+
+**Observer repository URL:**
+
+    https://raw.githubusercontent.com/0xterricola/observer/main/logos-repo.json
+
+**Pairing:** QR offers expire after five minutes.
+
+**Basecamp Chat:** Chat integration additionally requires the JSON-RPC Bridge, which is not automatically installed with Observer yet. See [Observer Chat Setup](OBSERVER_CHAT_SETUP.md).
+
+For detailed instructions, platform requirements, updating, and troubleshooting, continue below.
+
+---
+
 ## Supported platforms
 
 - macOS ARM64 (Apple Silicon)
